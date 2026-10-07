@@ -20,7 +20,8 @@ public class ReviewGenerator : IReviewGenerator
             return ResetStatus(allQuestions.ToList());
 
         var result = allQuestions
-            .OrderBy(q => q.EFValue)
+            .OrderBy(DueOrder)
+            .ThenBy(q => q.EFValue)
             .ThenBy(q => _random.Next())
             .Take(count)
             .ToList();
@@ -34,7 +35,6 @@ public class ReviewGenerator : IReviewGenerator
 
         var weakPoints = allQuestions.Where(q => q.EFValue < 1.8).ToList();
         var learning = allQuestions.Where(q => q.EFValue >= 1.8 && q.EFValue < 2.3).ToList();
-        var mastered = allQuestions.Where(q => q.EFValue >= 2.3).ToList();
         var newQuestions = allQuestions.Where(q => q.ReviewTag.Count == 0).ToList();
 
         var result = new List<Question>();
@@ -48,7 +48,21 @@ public class ReviewGenerator : IReviewGenerator
         var newCount = (int)(options.TotalCount * options.NewQuestionRatio);
         result.AddRange(newQuestions.OrderBy(_ => _random.Next()).Take(newCount));
 
-        return result.Distinct().Take(options.TotalCount).ToList();
+        return result
+            .Distinct()
+            .OrderBy(DueOrder)
+            .ThenBy(q => q.EFValue)
+            .Take(options.TotalCount)
+            .ToList();
+    }
+
+    // SM-2 due-ness: questions without a scheduled date or already due come first;
+    // items scheduled for the future follow, ordered by their next review date.
+    private static int DueOrder(Question question)
+    {
+        if (question.NextReviewDate is null)
+            return 0;
+        return question.NextReviewDate.Value <= DateTime.Now ? 0 : 1;
     }
 
 

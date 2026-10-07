@@ -18,6 +18,7 @@ public partial class ResourceCenterWindow : Window
     private int _totalPages = 1;
     private string? _selectedUploadFilePath;
     private CancellationTokenSource? _loadCancellation;
+    private System.Windows.Threading.DispatcherTimer? _searchDebounceTimer;
 
     public ResourceCenterWindow(
         string serverUrl,
@@ -94,7 +95,22 @@ public partial class ResourceCenterWindow : Window
         if (!IsLoaded)
             return;
 
-        await LoadResourcesAsync(1);
+        // Debounce: fire one search after typing pauses instead of one per keystroke.
+        if (_searchDebounceTimer is null)
+        {
+            _searchDebounceTimer = new System.Windows.Threading.DispatcherTimer
+            {
+                Interval = TimeSpan.FromMilliseconds(400)
+            };
+            _searchDebounceTimer.Tick += async (_, _) =>
+            {
+                _searchDebounceTimer.Stop();
+                await LoadResourcesAsync(1);
+            };
+        }
+
+        _searchDebounceTimer.Stop();
+        _searchDebounceTimer.Start();
     }
 
     private void SelectUploadFileButton_Click(object sender, RoutedEventArgs e)
@@ -164,9 +180,17 @@ public partial class ResourceCenterWindow : Window
         if (dialog.ShowDialog(this) != true)
             return;
 
+        // The file name comes from the server; never trust it for path construction.
+        var safeFileName = Path.GetFileName(item.FileName.Replace('\\', '/'));
+        if (!safeFileName.EndsWith(".rhp", StringComparison.OrdinalIgnoreCase))
+        {
+            MessageBox.Show("该资源的文件类型不是 .rhp 项目包，已拒绝导入。", "导入失败", MessageBoxButton.OK, MessageBoxImage.Error);
+            return;
+        }
+
         var tempDirectory = Path.Combine(Path.GetTempPath(), "ReciteHelperResourceCenter", Guid.NewGuid().ToString("N"));
         Directory.CreateDirectory(tempDirectory);
-        var tempPath = Path.Combine(tempDirectory, item.FileName);
+        var tempPath = Path.Combine(tempDirectory, safeFileName);
 
         try
         {

@@ -191,7 +191,7 @@ public partial class MainWindow : Window
 
     }
 
-    private void CreateNewProject_Click(object sender, RoutedEventArgs e)
+    private async void CreateNewProject_Click(object sender, RoutedEventArgs e)
     {
         var select = new ProjectTypeSelectionWindow();
         var dialogResult = select.ShowDialog();
@@ -225,6 +225,31 @@ public partial class MainWindow : Window
             };
 
             result = createWindow.ShowDialog();
+        }
+        else if (type.TemplateType == ProjectTemplateType.FlashCard)
+        {
+            var openFileDialog = new OpenFileDialog
+            {
+                Filter = "ReciteHelper项目文件 (*.rhproj)|*.rhproj",
+                Multiselect = false,
+                Title = "选择要进行卡片学习的项目"
+            };
+            if (openFileDialog.ShowDialog(this) != true)
+                return;
+
+            var flashCardProject = await _projectFileService.OpenProjectAsync(openFileDialog.FileName);
+            if (flashCardProject is null ||
+                !flashCardProject.Chapters?.Any(chapter => chapter.Questions is { Count: > 0 }) == true)
+            {
+                MessageBox.Show("项目中没有可用的题目，无法进行卡片学习。", "无法开始", MessageBoxButton.OK, MessageBoxImage.Warning);
+                return;
+            }
+
+            new FlashCardWindow(flashCardProject, _projectFileService)
+            {
+                Owner = this
+            }.ShowDialog();
+            result = true;
         }
         else
         {

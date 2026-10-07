@@ -4,7 +4,6 @@ using System.Net.Http.Json;
 using System.Security.Cryptography;
 using System.Text;
 using System.Text.Json;
-using System.Xml.Linq;
 
 namespace ReciteHelper.Infrastructure.Services;
 
@@ -76,7 +75,7 @@ public sealed class HostedModelService(IConfigService configService)
                     GetClientVersion()),
                 cancellationToken);
 
-            SaveHostedLicenseId(response.LicenseId);
+            await SaveHostedLicenseIdAsync(response.LicenseId);
             return new HostedLicenseStatus(true, "激活成功。", response.ExpiresAtUtc, response.QuotaRemaining);
         }
         catch (Exception ex)
@@ -142,7 +141,7 @@ public sealed class HostedModelService(IConfigService configService)
                 GetClientVersion()),
             cancellationToken);
 
-        SaveHostedLicenseId(response.LicenseId);
+        await SaveHostedLicenseIdAsync(response.LicenseId);
         return new HostedActivation(serviceUrl, response.LicenseId);
     }
 
@@ -211,31 +210,22 @@ public sealed class HostedModelService(IConfigService configService)
         return typeof(HostedModelService).Assembly.GetName().Version?.ToString() ?? "unknown";
     }
 
-    private static void SaveHostedLicenseId(string licenseId)
+    private async Task SaveHostedLicenseIdAsync(string licenseId)
     {
-        var configPath = Path.Combine(AppDomain.CurrentDomain.BaseDirectory, "Config.xml");
-        var document = File.Exists(configPath)
-            ? XDocument.Load(configPath)
-            : new XDocument(new XElement("Config"));
-        var root = document.Root ?? new XElement("Config");
-        if (document.Root is null)
-            document.Add(root);
-
-        SetElement(root, "HostedLicenseId", licenseId);
-        SetElement(root, "HostedLicenseCode", string.Empty);
-        document.Save(configPath);
-    }
-
-    private static void SetElement(XElement root, string name, string value)
-    {
-        var element = root.Element(name);
-        if (element is null)
+        try
         {
-            element = new XElement(name);
-            root.Add(element);
+            // Persist through IConfigService so encryption, path resolution and the
+            // rest of the configuration handling stay in exactly one place.
+            var config = await configService.LoadAsync();
+            config.HostedLicenseId = licenseId;
+            config.HostedLicenseCode = string.Empty;
+            await configService.SaveAsync(config);
         }
-
-        element.Value = value;
+        catch (Exception)
+        {
+            // Activation already succeeded server-side; persistence is best-effort and
+            // the user can simply re-activate if the license id could not be stored.
+        }
     }
 
     private sealed record HostedActivation(string ServiceUrl, string LicenseId);

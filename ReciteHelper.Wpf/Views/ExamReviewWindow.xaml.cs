@@ -17,7 +17,6 @@ namespace ReciteHelper.Wpf.Views;
 /// </summary>
 public partial class ExamReviewWindow : Window, INotifyPropertyChanged
 {
-    private readonly IExamAnswerService _examAnswerService;
     private readonly Project? _project;
     private readonly IProjectCreationService? _projectCreationService;
     private readonly IProjectFileService? _projectFileService;
@@ -31,12 +30,10 @@ public partial class ExamReviewWindow : Window, INotifyPropertyChanged
 
     public ExamReviewWindow(
         List<ExamQuestionItem> examQuestions,
-        IExamAnswerService examAnswerService,
         Project? project = null,
         IProjectCreationService? projectCreationService = null,
         IProjectFileService? projectFileService = null)
     {
-        _examAnswerService = examAnswerService;
         _project = project;
         _projectCreationService = projectCreationService;
         _projectFileService = projectFileService;
@@ -55,12 +52,12 @@ public partial class ExamReviewWindow : Window, INotifyPropertyChanged
     private void CalculateStatistics()
     {
         _totalQuestions = _examQuestions.Count;
-        _correctCount = _examQuestions.Count(q => _examAnswerService.IsCorrect(q.Question!, q.UserAnswer));
+        _correctCount = _examQuestions.Count(q => q.IsCorrectResult == true);
         _wrongCount = _totalQuestions - _correctCount;
         _accuracy = _totalQuestions > 0 ? (_correctCount * 100.0) / _totalQuestions : 0;
         _totalScore = _examQuestions.Sum(question => question.Score);
         _earnedScore = _examQuestions
-            .Where(question => _examAnswerService.IsCorrect(question.Question!, question.UserAnswer))
+            .Where(question => question.IsCorrectResult == true)
             .Sum(question => question.Score);
     }
 
@@ -80,8 +77,8 @@ public partial class ExamReviewWindow : Window, INotifyPropertyChanged
                 Explanation = string.IsNullOrWhiteSpace(examQuestion.Explanation)
                     ? "无解析"
                     : examQuestion.Explanation,
-                IsCorrect = _examAnswerService.IsCorrect(examQuestion.Question!, examQuestion.UserAnswer),
-                ItemStyle = _examAnswerService.IsCorrect(examQuestion.Question!, examQuestion.UserAnswer) ?
+                IsCorrect = examQuestion.IsCorrectResult == true,
+                ItemStyle = examQuestion.IsCorrectResult == true ?
                     (Style)FindResource("CorrectAnswerStyle") :
                     (Style)FindResource("WrongAnswerStyle")
             };
@@ -148,7 +145,7 @@ public partial class ExamReviewWindow : Window, INotifyPropertyChanged
         for (int i = 0; i < _examQuestions.Count; i++)
         {
             var question = _examQuestions[i];
-            var isCorrect = _examAnswerService.IsCorrect(question.Question!, question.UserAnswer);
+            var isCorrect = question.IsCorrectResult == true;
 
             writer.WriteLine($"第{i + 1}题 {(isCorrect ? "✓" : "✗")}");
             writer.WriteLine($"题目：{question.Question?.Text}");
@@ -247,14 +244,14 @@ public partial class ExamReviewWindow : Window, INotifyPropertyChanged
         return _project is { Chapters.Count: > 0 } &&
                _projectCreationService is not null &&
                _examQuestions.Any(question => question.Question is not null &&
-                   !_examAnswerService.IsCorrect(question.Question, question.UserAnswer));
+                   question.IsCorrectResult == false);
     }
 
     private List<WrongQuestionImportCandidate> BuildWrongQuestionCandidates()
     {
         var existingQuestions = _project?.ExportQuestions() ?? [];
         return _examQuestions
-            .Where(item => item.Question is not null && !_examAnswerService.IsCorrect(item.Question, item.UserAnswer))
+            .Where(item => item.Question is not null && item.IsCorrectResult == false)
             .Select(item =>
             {
                 var maxSimilarity = existingQuestions

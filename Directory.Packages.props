@@ -1,0 +1,45 @@
+<Project>
+
+  <!--
+    Central package versions. The AquaAvgFramework submodule declares no
+    PackageReference items, so central package management stays safe for it.
+    Keep LlmTornado (chat) and OpenAI (chat + embeddings) as the two supported
+    LLM SDKs; SemanticKernel is pinned to 1.73.0-alpha only for its ONNX BERT
+    embedding connector — replace it with a self-managed ONNX inference path
+    before attempting any upgrade.
+  -->
+  <PropertyGroup>
+    <ManagePackageVersionsCentrally>true</ManagePackageVersionsCentrally>
+    <CentralPackageTransitivePinningEnabled>false</CentralPackageTransitivePinningEnabled>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <PackageVersion Include="CommunityToolkit.Mvvm" Version="8.4.0" />
+    <PackageVersion Include="Docnet.Core" Version="2.6.0" />
+    <PackageVersion Include="FreeSpire.Doc" Version="12.2.0" />
+    <PackageVersion Include="FreeSpire.Presentation" Version="9.3.0" />
+    <PackageVersion Include="jieba.NET" Version="0.42.2" />
+    <PackageVersion Include="LlmTornado" Version="3.8.12" />
+    <PackageVersion Include="LlmTornado.Agents" Version="1.0.11" />
+    <PackageVersion Include="Markdig.Wpf" Version="0.5.0.1" />
+    <PackageVersion Include="Microsoft.CodeAnalysis.CSharp.Scripting" Version="5.0.0" />
+    <PackageVersion Include="Microsoft.Extensions.DependencyInjection" Version="10.0.4" />
+    <PackageVersion Include="Microsoft.Extensions.Logging" Version="10.0.4" />
+    <PackageVersion Include="Microsoft.Extensions.Logging.Console" Version="10.0.4" />
+    <PackageVersion Include="Microsoft.Extensions.Logging.Debug" Version="10.0.4" />
+    <PackageVersion Include="Microsoft.ML.OnnxRuntime" Version="1.23.2" />
+    <PackageVersion Include="Microsoft.NET.Test.Sdk" Version="17.14.1" />
+    <PackageVersion Include="Microsoft.SemanticKernel.Abstractions" Version="1.73.0" />
+    <PackageVersion Include="Microsoft.SemanticKernel.Connectors.Onnx" Version="1.73.0-alpha" />
+    <PackageVersion Include="Microsoft.SemanticKernel.Core" Version="1.73.0" />
+    <PackageVersion Include="Microsoft.Xaml.Behaviors.Wpf" Version="1.1.142" />
+    <PackageVersion Include="OpenAI" Version="2.11.0" />
+    <PackageVersion Include="System.Management" Version="10.0.1" />
+    <PackageVersion Include="System.Security.Cryptography.Pkcs" Version="8.0.1" />
+    <PackageVersion Include="System.Security.Cryptography.ProtectedData" Version="10.0.1" />
+    <PackageVersion Include="System.Security.Cryptography.Xml" Version="8.0.2" />
+    <PackageVersion Include="xunit" Version="2.9.3" />
+    <PackageVersion Include="xunit.runner.visualstudio" Version="3.1.1" />
+  </ItemGroup>
+
+</Project>

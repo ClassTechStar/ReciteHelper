@@ -1,23 +1,28 @@
 ﻿<Config>
-	
+	<!--
+	  提示：
+	  1. 首次启动后，本文件会被复制到 %APPDATA%\ReciteHelper\Config.xml 并以该副本为准
+	     （安装目录通常没有写权限）。修改配置请编辑 %APPDATA% 下的文件。
+	  2. API Key 支持两种写法：
+	     - 直接填写明文（保存后会被 DPAPI 加密存储）；
+	     - 使用环境变量占位：%Environment.GetEnvironmentVariable("变量名")%
+	  3. ResourceCenterServerUrl / HostedServiceUrl 建议使用 https:// 地址。
+	-->
 	<Version>2</Version>
 
-	<DeepSeekKey>%Environment.GetEnvironmentVariable("DSAPI")%</DeepSeekKey>
-	<QwenKey>%Environment.GetEnvironmentVariable("BitchSDAU")%</QwenKey>
+	<DeepSeekKey>%Environment.GetEnvironmentVariable("RECITEHELPER_DEEPSEEK_KEY")%</DeepSeekKey>
+	<QwenKey>%Environment.GetEnvironmentVariable("RECITEHELPER_QWEN_KEY")%</QwenKey>
 	<ResourceCenterServerUrl>http://47.250.181.152:5000</ResourceCenterServerUrl>
 	<HostedServiceUrl></HostedServiceUrl>
 	<HostedLicenseCode></HostedLicenseCode>
 	<HostedLicenseId></HostedLicenseId>
 	<MissingStrategy>Ignore</MissingStrategy>
-	
-	<OCRAccess></OCRAccess>
-	<OCRSecret></OCRSecret>
-	
+
 	<PhonkOptions>
 		<EnablePhonk>false</EnablePhonk>
 		<WrongCount>3</WrongCount>
 	</PhonkOptions>
-	
+
 	<RStandard>45</RStandard>
-	
+
 </Config>

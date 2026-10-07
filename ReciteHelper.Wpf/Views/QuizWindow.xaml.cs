@@ -717,7 +717,7 @@ public partial class QuizWindow : Window, INotifyPropertyChanged
         answerResult.ReviewTag.SetId(tagCount + 1);
         _questions[_currentQuestionIndex].Question!.ReviewTag.Add(answerResult.ReviewTag);
 
-        currentQuestion.Question!.EFValue = answerResult.NewEFValue;
+        currentQuestion.Question!.ApplyReviewOutcome(answerResult.NewEFValue, answerResult.QValue);
         QDisplayLabel.Content = $"Q Predict: {answerResult.QValue}";
 
         // Play phonk effect
@@ -850,7 +850,10 @@ public partial class QuizWindow : Window, INotifyPropertyChanged
                 AnswerStatus.NotAnswered => null,
                 AnswerStatus.Correct => true,
                 AnswerStatus.Wrong => false,
-                _ => throw new NotImplementedException("Fuck U")
+                _ => throw new ArgumentOutOfRangeException(
+                    nameof(_questions),
+                    _questions[i].Status,
+                    "未知的答题状态。")
             };
 
         }

@@ -1,3 +1,4 @@
+using ReciteHelper.Core.Interfaces.Configuration;
 using ReciteHelper.Infrastructure.Services;
 using System.Diagnostics;
 using System.IO;
@@ -11,10 +12,10 @@ public partial class ActivationWindow : Window
     private readonly HostedModelService _hostedModelService;
     private readonly string _configPath;
 
-    public ActivationWindow(HostedModelService hostedModelService)
+    public ActivationWindow(HostedModelService hostedModelService, IConfigService configService)
     {
         _hostedModelService = hostedModelService;
-        _configPath = Path.Combine(AppDomain.CurrentDomain.BaseDirectory, "Config.xml");
+        _configPath = configService.ConfigPath;
         InitializeComponent();
     }
 

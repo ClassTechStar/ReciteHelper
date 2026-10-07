@@ -16,6 +16,8 @@ public class FileVectorStore
 
     public IReadOnlyList<VectorEntry> Entries => _entries;
 
+    public string FilePath => _filePath;
+
     public void Add(VectorEntry entry)
     {
         _entries.Add(entry);
@@ -30,7 +32,10 @@ public class FileVectorStore
 
     public List<(VectorEntry Entry, float Score)> Search(float[] queryVector, int topK = 5)
     {
+        // Entries embedded by a different model (different dimension) can never match
+        // the query vector — comparing them would silently yield garbage scores.
         return _entries
+            .Where(e => e.Vector.Length == queryVector.Length)
             .Select(e => (e, CosineSimilarity(queryVector, e.Vector)))
             .OrderByDescending(x => x.Item2)
             .Take(topK)

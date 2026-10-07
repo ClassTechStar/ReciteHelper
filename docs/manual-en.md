@@ -16,20 +16,22 @@ Features marked as "Preview" may still change substantially.
 
 ## Before You Start
 
-### Configure API Keys
+### Configuration File
 
-Open `Config.xml` in the application directory. The recommended configuration structure is:
+Since v5.1 the configuration file lives in `%APPDATA%\ReciteHelper\Config.xml`. On the first run of the new version, the program automatically migrates the old `Config.xml` from the installation directory to that location (installation directories such as Program Files are usually not writable). Edit the copy in `%APPDATA%` from then on.
+
+The recommended configuration structure is:
 
 ```xml
 <Config>
     <Version>2</Version>
 
-    <DeepSeekKey>%Environment.GetEnvironmentVariable("DSAPI")%</DeepSeekKey>
-    <QwenKey>%Environment.GetEnvironmentVariable("QWEN_API_KEY")%</QwenKey>
+    <DeepSeekKey>%Environment.GetEnvironmentVariable("RECITEHELPER_DEEPSEEK_KEY")%</DeepSeekKey>
+    <QwenKey>%Environment.GetEnvironmentVariable("RECITEHELPER_QWEN_KEY")%</QwenKey>
+    <ResourceCenterServerUrl>http://47.250.181.152:5000</ResourceCenterServerUrl>
+    <HostedServiceUrl></HostedServiceUrl>
+    <HostedLicenseCode></HostedLicenseCode>
     <MissingStrategy>Ignore</MissingStrategy>
-
-    <OCRAccess></OCRAccess>
-    <OCRSecret></OCRSecret>
 
     <PhonkOptions>
         <EnablePhonk>false</EnablePhonk>
@@ -45,8 +47,9 @@ Open `Config.xml` in the application directory. The recommended configuration st
 - `MissingStrategy`: controls recovery when generated knowledge is missing. `Ignore` favors speed; `Replay` retries missing content at the cost of more time and API usage.
 - `RStandard`: the similarity threshold used when evaluating short answers. It normally does not need to be changed.
 - `PhonkOptions`: Easter egg settings. When `EnablePhonk` is enabled, a special effect is triggered after `WrongCount` consecutive incorrect answers.
+- `DeepSeekApiEndpoint`, `DeepSeekChatModel`, `QwenApiEndpoint`, `QwenEmbeddingModel` (optional): overrides for API endpoints and model names; the defaults are usually fine.
 
-Keys may be written directly into their elements, but environment variables are recommended so credentials are not stored as plain text. For example:
+Keys may be written directly into their elements or via environment-variable placeholders. Plain-text keys are automatically encrypted with DPAPI (current user) when the program saves the configuration; environment-variable placeholders avoid any plain text on disk entirely. For example:
 
 ```xml
 <DeepSeekKey>%Environment.GetEnvironmentVariable("DEEPSEEK_API_KEY")%</DeepSeekKey>
@@ -194,6 +197,27 @@ This feature remains in preview. Generation time and output quality depend on th
 
 ---
 
+## Resource Center and Hosted Model Service
+
+### Hosted Model Service (Activation Code)
+
+If you do not have your own DeepSeek / Qwen API keys, you can use the hosted model service: fill in the `HostedLicenseCode` you received in `Config.xml`, and the program activates automatically whenever a model call is needed. You can also enter the activation code in the activation window shown by the startup wizard. Once activated, text extraction, question generation, and knowledge-base embeddings are handled by the hosted service; quota and expiry are reported by the server.
+
+- Activation is bound to a device; replacing hardware or reinstalling the OS may require re-activation.
+- You can also keep using your own API keys — configuring either one is sufficient.
+
+### Resource Center
+
+The Resource Center lets the community share and fetch study project packages (`.rhp`):
+
+- **Search**: open the Resource Center from the main screen and filter by uploader, school, or subject with paging.
+- **Upload**: pick a local `.rhp` package and fill in the uploader, school, and subject metadata.
+- **Download & import**: choose a destination folder; the package is downloaded and imported automatically and then appears in recent projects.
+
+Security note: downloaded packages are validated before import (size caps, entry types, and the package manifest), but only fetch resources from sources you trust; do not include personal or sensitive information in uploads.
+
+---
+
 ## Frequently Asked Questions
 
 **Q: Why are there no chapters or questions after project creation?**
@@ -224,11 +248,24 @@ A: Yes. Question types use backward-compatible deserialization. Older projects w
 
 ## Changelog
 
-### v4 (2026-06-28)
+### v5.1
+
+- Added the Resource Center and the hosted model service (activation codes).
+- Added FlashCard study mode.
+- Smart review now uses SM-2 interval scheduling and prioritizes due questions.
+- Mock-exam subjective questions now use the same semantic judging as practice.
+- API keys are encrypted at rest; configuration moved to %APPDATA%; downloads are validated.
+- Fixed a clustering issue that could silently drop knowledge points; project files gained a schema version and atomic saves.
+- Fixed CI and added automated tests.
+
+### v5 (2026-06-28)
+
+- Added incorrect-answer knowledge retrieval, matched-content highlighting, and on-demand AI explanations.
+
+### v4 (2026-06-26)
 
 - Added independent generation, loading, and interaction for single-choice and short-answer questions.
 - Added a file-based knowledge base that is built, loaded, imported, and exported with each project.
-- Added incorrect-answer retrieval, matched-content highlighting, and optional AI explanations.
 - Added a four-stage project creation progress window.
 - Added personalized smart review and preset exam features.
 - Refactored the application into SharedKernel, Core, Application, Infrastructure, and WPF layers.

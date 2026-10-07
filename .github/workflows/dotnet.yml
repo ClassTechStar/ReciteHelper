@@ -2,42 +2,70 @@ name: .NET WPF Build
 
 on:
   push:
-    branches: [ "main" ]
+    branches: [ "primary", "main" ]
+    tags: [ "v*" ]
   pull_request:
-    branches: [ "main" ]
+    branches: [ "primary", "main" ]
 
 jobs:
   build:
     runs-on: windows-latest
 
     steps:
-    - uses: actions/checkout@v4
-    
+    - name: Checkout (with submodules)
+      uses: actions/checkout@v4
+      with:
+        submodules: recursive
+
     - name: Setup .NET
       uses: actions/setup-dotnet@v4
       with:
         dotnet-version: 10.0.x
-    
-    - name: Build
-      run: dotnet build --configuration Release
 
-    - name: Publish Application
-      run: |
-        $projectFile = Get-ChildItem -Path . -Filter *.csproj -Recurse | Select-Object -First 1
-        if ($projectFile) {
-          dotnet publish $projectFile.FullName `
-            --configuration Release `
-            --output ./publish `
-            --self-contained true `
-            --runtime win-x64 `
-            /p:PublishSingleFile=true
-        } else {
-          Write-Error "Could not find project file (.csproj)"
-          exit 1
-        }
-    
+    - name: Build solution
+      run: dotnet build src/ReciteHelper.slnx --configuration Release
+
+    - name: Run tests
+      run: dotnet test src/ReciteHelper.slnx --configuration Release --no-build
+
+    - name: Publish application
+      shell: pwsh
+      run: ./build.ps1 -ArtifactsDirectory ./artifacts
+
     - name: Upload Artifacts
       uses: actions/upload-artifact@v4
       with:
         name: ReciteHelper-App
-        path: ./publish/
+        path: |
+          ./artifacts/publish/
+          ./artifacts/reports/
+
+  release:
+    if: startsWith(github.ref, 'refs/tags/v')
+    needs: build
+    runs-on: windows-latest
+    permissions:
+      contents: write
+
+    steps:
+    - name: Checkout (with submodules)
+      uses: actions/checkout@v4
+      with:
+        submodules: recursive
+
+    - name: Setup .NET
+      uses: actions/setup-dotnet@v4
+      with:
+        dotnet-version: 10.0.x
+
+    - name: Publish release build
+      shell: pwsh
+      run: ./build.ps1 -ArtifactsDirectory ./artifacts -Version ${{ github.ref_name }}
+
+    - name: Create GitHub Release
+      uses: softprops/action-gh-release@v2
+      with:
+        generate_release_notes: true
+        files: |
+          ./artifacts/*.zip
+          ./artifacts/reports/SHA256SUMS.txt

@@ -9,6 +9,8 @@ param(
 
     [switch]$SkipArchive,
 
+    [string]$Version,
+
     [string]$ArtifactsDirectory
 )
 
@@ -121,7 +123,14 @@ try {
         "--runtime", $RuntimeIdentifier
     )
 
-    Invoke-DotNet -Arguments @(
+    $versionProperty = @()
+    if (-not [string]::IsNullOrWhiteSpace($Version)) {
+        # Strip a leading "v" so tags like v5.1.0 become the assembly version 5.1.0.
+        $normalizedVersion = $Version.TrimStart('v', 'V')
+        $versionProperty = @("-p:Version=$normalizedVersion")
+    }
+
+    $publishArguments = @(
         "publish", $projectFile,
         "--configuration", $Configuration,
         "--runtime", $RuntimeIdentifier,
@@ -131,7 +140,9 @@ try {
         "-p:DebugType=None",
         "-p:DebugSymbols=false",
         "-p:ContinuousIntegrationBuild=true"
-    )
+    ) + $versionProperty
+
+    Invoke-DotNet -Arguments $publishArguments
 
     $mainExecutable = Join-Path $publishDirectory "ReciteHelper.Wpf.exe"
     if (-not (Test-Path -LiteralPath $mainExecutable -PathType Leaf)) {

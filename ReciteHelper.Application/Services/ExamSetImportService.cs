@@ -56,20 +56,43 @@ public sealed class ExamSetImportService(
             extractedSets.Count));
         var sourceFileName = Path.GetFileName(sourceFilePath);
         var examSets = new List<ExamSet>(extractedSets.Count);
+        var totalSkippedQuestions = 0;
+        var firstSkippedReason = string.Empty;
         for (var index = 0; index < extractedSets.Count; index++)
         {
             cancellationToken.ThrowIfCancellationRequested();
-            examSets.Add(Normalize(extractedSets[index], project, sourceFileName, index + 1));
+            var examSet = Normalize(extractedSets[index], project, sourceFileName, index + 1, out var skippedReasons);
+            if (examSet is null)
+            {
+                totalSkippedQuestions += skippedReasons.Count;
+                firstSkippedReason ??= skippedReasons.FirstOrDefault();
+                progress?.Report(new ExamSetImportProgress(
+                    ExamSetImportStage.ValidatingQuestions,
+                    $"第 {index + 1}/{extractedSets.Count} 套试卷没有可用的题目，已跳过。",
+                    index + 1,
+                    extractedSets.Count));
+                continue;
+            }
+
+            totalSkippedQuestions += skippedReasons.Count;
+            firstSkippedReason ??= skippedReasons.FirstOrDefault();
+            examSets.Add(examSet);
             progress?.Report(new ExamSetImportProgress(
                 ExamSetImportStage.ValidatingQuestions,
-                $"已校验第 {index + 1}/{extractedSets.Count} 套试卷：{examSets[index].Title}",
+                $"已校验第 {index + 1}/{extractedSets.Count} 套试卷：{examSet.Title}",
                 index + 1,
                 extractedSets.Count));
         }
 
+        if (examSets.Count == 0)
+            throw new InvalidDataException(
+                $"导入失败：所有试卷都没有可用的题目。{firstSkippedReason}");
+
         progress?.Report(new ExamSetImportProgress(
             ExamSetImportStage.SavingPapers,
-            $"题目校验完成，准备保存 {examSets.Count} 套试卷。",
+            totalSkippedQuestions > 0
+                ? $"题目校验完成：{totalSkippedQuestions} 道题校验未通过已跳过（例如：{firstSkippedReason}），准备保存 {examSets.Count} 套试卷。"
+                : $"题目校验完成，准备保存 {examSets.Count} 套试卷。",
             0,
             examSets.Count));
         for (var index = 0; index < examSets.Count; index++)
@@ -286,14 +309,16 @@ public sealed class ExamSetImportService(
             : text;
     }
 
-    private static ExamSet Normalize(
+    private static ExamSet? Normalize(
         ExtractedExamSet extracted,
         Project project,
         string sourceFileName,
-        int setNumber)
+        int setNumber,
+        out List<string> skippedReasons)
     {
+        skippedReasons = [];
         if (extracted.Questions.Count == 0)
-            throw new InvalidDataException($"第 {setNumber} 套试卷不包含题目。");
+            return null;
 
         var title = string.IsNullOrWhiteSpace(extracted.Title)
             ? $"{Path.GetFileNameWithoutExtension(sourceFileName)} 第{setNumber}套"
@@ -312,10 +337,21 @@ public sealed class ExamSetImportService(
             SuggestedDurationMinutes = Math.Clamp(extracted.SuggestedDurationMinutes, 10, 300)
         };
 
+        // One malformed question no longer discards the whole paper: skip it and
+        // surface the reason in the import progress report.
         for (var index = 0; index < extracted.Questions.Count; index++)
-            examSet.Questions.Add(NormalizeQuestion(extracted.Questions[index], index + 1, title));
+        {
+            try
+            {
+                examSet.Questions.Add(NormalizeQuestion(extracted.Questions[index], index + 1, title));
+            }
+            catch (InvalidDataException ex)
+            {
+                skippedReasons.Add(ex.Message);
+            }
+        }
 
-        return examSet;
+        return examSet.Questions.Count == 0 ? null : examSet;
     }
 
     private static ExamSetQuestion NormalizeQuestion(ExtractedQuestion extracted, int fallbackNumber, string examTitle)

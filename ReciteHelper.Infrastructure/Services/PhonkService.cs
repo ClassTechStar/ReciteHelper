@@ -10,6 +10,7 @@ public class PhonkService : IPhonkService
     private readonly Random _random = new();
     private readonly string _soundDirectory;
     private readonly string _imageBaseUri;
+    private bool _configLoaded;
 
     public event EventHandler<PhonkEventArgs>? PhonkTriggered;
 
@@ -19,9 +20,6 @@ public class PhonkService : IPhonkService
     {
         _configService = configService;
 
-        var config = _configService.LoadAsync().Result;
-        IsEnabled = config.PhonkOptions?.EnablePhonk ?? false;
-
         var baseDirectory = AppDomain.CurrentDomain.BaseDirectory;
         _soundDirectory = Path.Combine(baseDirectory, "Images", "Phonk", "Soundfx");
         _imageBaseUri = "pack://application:,,,/ReciteHelper;component/Images/Phonk/Caveira/";
@@ -29,6 +27,15 @@ public class PhonkService : IPhonkService
 
     public async Task PlayRandomPhonkAsync()
     {
+        // Load the toggle lazily on first use; blocking on config IO in the
+        // constructor risks a sync-over-async deadlock on the UI thread.
+        if (!_configLoaded)
+        {
+            var config = await _configService.LoadAsync();
+            IsEnabled = config.PhonkOptions?.EnablePhonk ?? false;
+            _configLoaded = true;
+        }
+
         if (!IsEnabled) return;
 
         var number = _random.Next(1, 10);

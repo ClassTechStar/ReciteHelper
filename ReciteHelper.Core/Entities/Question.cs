@@ -54,6 +54,15 @@ public class Question : Entity
     [JsonPropertyName("ef_value")]
     public double EFValue { get; set; } = 2.5d;
 
+    [JsonPropertyName("repetitions")]
+    public int Repetitions { get; set; }
+
+    [JsonPropertyName("interval_days")]
+    public int IntervalDays { get; set; }
+
+    [JsonPropertyName("next_review")]
+    public DateTime? NextReviewDate { get; set; }
+
     private Question(bool? status, string? text, List<ReviewTag> reviewTags, string? correctAnswer, double efValue)
     {
         Status = status;
@@ -220,5 +229,38 @@ public class Question : Entity
 
         var first = char.ToUpperInvariant(trimmed[0]);
         return first is >= 'A' and <= 'Z' ? first.ToString() : string.Empty;
+    }
+
+    /// <summary>
+    /// SM-2 scheduling (see docs/Dev/sm-algorithm.md): stores the updated easiness
+    /// factor and advances the review interval — 1 day, then 6 days, then
+    /// interval × EF; a failed recall (q &lt; 3) resets the sequence.
+    /// </summary>
+    public void ApplyReviewOutcome(double newEFValue, int quality)
+    {
+        EFValue = Math.Clamp(newEFValue, 1.3d, 5.0d);
+
+        if (quality < 3)
+        {
+            Repetitions = 0;
+            IntervalDays = 1;
+        }
+        else if (Repetitions == 0)
+        {
+            Repetitions = 1;
+            IntervalDays = 1;
+        }
+        else if (Repetitions == 1)
+        {
+            Repetitions = 2;
+            IntervalDays = 6;
+        }
+        else
+        {
+            Repetitions++;
+            IntervalDays = Math.Max(1, (int)Math.Round(IntervalDays * EFValue));
+        }
+
+        NextReviewDate = DateTime.Now.AddDays(IntervalDays);
     }
 }

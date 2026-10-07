@@ -17,7 +17,6 @@ public partial class KnowledgePointWindow : Window, INotifyPropertyChanged
     private readonly IProjectFileService _projectFileService;
     private Project _currentProject;
     private KnowledgePoint _currentKnowledgePoint;
-    private string _currentMarkdownContent;
     private Renderer renderer;
 
     public KnowledgePointWindow(Project project, IProjectFileService projectFileService)

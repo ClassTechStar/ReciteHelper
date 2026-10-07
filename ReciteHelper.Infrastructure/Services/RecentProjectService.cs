@@ -8,18 +8,44 @@ public sealed class RecentProjectService : IRecentProjectService
 {
     private const int MaxRecentProjects = 10;
     private readonly string _recentProjectsPath;
+    private readonly string _legacyRecentProjectsPath;
 
     public RecentProjectService()
     {
-        _recentProjectsPath = Path.Combine(AppDomain.CurrentDomain.BaseDirectory, "recent_projects.json");
+        var appDataDirectory = Path.Combine(
+            Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData),
+            "ReciteHelper");
+        _recentProjectsPath = Path.Combine(appDataDirectory, "recent_projects.json");
+        _legacyRecentProjectsPath = Path.Combine(AppDomain.CurrentDomain.BaseDirectory, "recent_projects.json");
+    }
+
+    private string EnsureRecentProjectsPath()
+    {
+        // Migrate the list from the install directory (not writable under Program
+        // Files) into %APPDATA% on the first run after upgrading.
+        if (!File.Exists(_recentProjectsPath) && File.Exists(_legacyRecentProjectsPath))
+        {
+            try
+            {
+                Directory.CreateDirectory(Path.GetDirectoryName(_recentProjectsPath)!);
+                File.Copy(_legacyRecentProjectsPath, _recentProjectsPath);
+            }
+            catch (IOException)
+            {
+                return File.Exists(_recentProjectsPath) ? _recentProjectsPath : _legacyRecentProjectsPath;
+            }
+        }
+
+        return _recentProjectsPath;
     }
 
     public async Task<IReadOnlyList<RecentProject>> LoadAsync()
     {
-        if (!File.Exists(_recentProjectsPath))
+        var path = EnsureRecentProjectsPath();
+        if (!File.Exists(path))
             return [];
 
-        await using var stream = File.OpenRead(_recentProjectsPath);
+        await using var stream = File.OpenRead(path);
         var projects = await JsonSerializer.DeserializeAsync<List<RecentProject>>(stream);
         return Sort(projects ?? []);
     }
@@ -56,8 +82,13 @@ public sealed class RecentProjectService : IRecentProjectService
 
     private async Task SaveAsync(IReadOnlyList<RecentProject> projects)
     {
+        var path = EnsureRecentProjectsPath();
+        Directory.CreateDirectory(Path.GetDirectoryName(path)!);
         var json = JsonSerializer.Serialize(projects, new JsonSerializerOptions { WriteIndented = true });
-        await File.WriteAllTextAsync(_recentProjectsPath, json);
+
+        var tempPath = $"{path}.tmp";
+        await File.WriteAllTextAsync(tempPath, json);
+        File.Move(tempPath, path, overwrite: true);
     }
 
     private static List<RecentProject> Sort(IEnumerable<RecentProject> projects)

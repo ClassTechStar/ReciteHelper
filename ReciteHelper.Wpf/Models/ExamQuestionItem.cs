@@ -16,6 +16,12 @@ public sealed class ExamQuestionItem : INotifyPropertyChanged
     public int Score { get; set; }
     public string Explanation { get; set; } = string.Empty;
 
+    /// <summary>
+    /// Verdict computed once at submission time (semantic judging for subjective
+    /// questions); review pages read this instead of re-evaluating repeatedly.
+    /// </summary>
+    public bool? IsCorrectResult { get; set; }
+
     public string UserAnswer
     {
         get => _userAnswer;

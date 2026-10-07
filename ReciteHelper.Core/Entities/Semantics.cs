@@ -1,4 +1,4 @@
-﻿using ReciteHelper.SharedKernel;
+using ReciteHelper.SharedKernel;
 
 namespace ReciteHelper.Core.Entities;
 
@@ -8,14 +8,17 @@ public class Semantics : Entity
     public List<string> Tags { get; set; } = new();
     public string? Summary { get; set; }
 
+    // Identity is the surrogate Id. Summary-based equality silently dropped
+    // knowledge points with identical (often empty) summaries during clustering.
     public override bool Equals(object? obj)
     {
-        return obj is Semantics other && other.Summary == this.Summary;
+        if (ReferenceEquals(this, obj))
+            return true;
+        return obj is Semantics other && other.Id == this.Id;
     }
 
     public override int GetHashCode()
     {
-        return Summary?.GetHashCode() ?? 0;
+        return Id;
     }
 }
-

@@ -21,9 +21,13 @@ public sealed class ProjectFileService : IProjectFileService
 
         await using var stream = File.OpenRead(projectPath);
         var project = await JsonSerializer.DeserializeAsync<Project>(stream);
-        project?.UpdateLastAccessed();
+        if (project is null)
+            return null;
 
-        if (project?.KnowledgeBasePath is not null)
+        project.UpdateLastAccessed();
+        MigrateSchema(project);
+
+        if (project.KnowledgeBasePath is not null)
         {
             var knowledgeBasePath = ResolveProjectRelativePath(projectPath, project.KnowledgeBasePath);
             if (File.Exists(knowledgeBasePath))
@@ -42,6 +46,20 @@ public sealed class ProjectFileService : IProjectFileService
         return project;
     }
 
+    /// <summary>
+    /// Legacy files (pre schema_version) deserialize with SchemaVersion == 0.
+    /// Future migrations branch here on the stored version before stamping CurrentSchemaVersion.
+    /// </summary>
+    private static void MigrateSchema(Project project)
+    {
+        if (project.SchemaVersion > Project.CurrentSchemaVersion)
+            throw new InvalidDataException(
+                $"项目文件版本（{project.SchemaVersion}）高于当前应用支持的版本（{Project.CurrentSchemaVersion}），请升级 ReciteHelper 后再打开。");
+
+        if (project.SchemaVersion < Project.CurrentSchemaVersion)
+            project.SchemaVersion = Project.CurrentSchemaVersion;
+    }
+
     public async Task SaveProjectAsync(Project project)
     {
         if (project.StoragePath is null || project.ProjectName is null)
@@ -50,8 +68,14 @@ public sealed class ProjectFileService : IProjectFileService
         var projectPath = Path.Combine(project.StoragePath, project.ProjectName, $"{project.ProjectName}.rhproj");
         Directory.CreateDirectory(Path.GetDirectoryName(projectPath)!);
 
+        project.SchemaVersion = Project.CurrentSchemaVersion;
         var json = JsonSerializer.Serialize(project, new JsonSerializerOptions { WriteIndented = true });
-        await File.WriteAllTextAsync(projectPath, json);
+
+        // Atomic save: readers never observe a partially written file, and a crash
+        // mid-save leaves the previous version intact (same pattern as JsonExamSetRepository).
+        var tempPath = $"{projectPath}.tmp";
+        await File.WriteAllTextAsync(tempPath, json);
+        File.Move(tempPath, projectPath, overwrite: true);
     }
 
     public async Task<ImportedProject> ImportProjectArchiveAsync(string archivePath, string destinationDirectory)
@@ -71,6 +95,7 @@ public sealed class ProjectFileService : IProjectFileService
 
         try
         {
+            ValidateProjectArchive(archivePath);
             ZipFile.ExtractToDirectory(archivePath, destinationRoot);
             var projectPath = FindImportedProjectFile(destinationRoot);
             var project = await OpenProjectFileWithoutKnowledgeBaseAsync(projectPath)
@@ -146,6 +171,77 @@ public sealed class ProjectFileService : IProjectFileService
     {
         await using var stream = File.OpenRead(projectPath);
         return await JsonSerializer.DeserializeAsync<Project>(stream);
+    }
+
+    // Resource-center archives are unpacked and imported automatically, so validate the
+    // zip before extraction: size caps, no executable payloads, no traversal paths.
+    private const long MaxArchiveUncompressedBytes = 1024L * 1024 * 1024;
+    private const long MaxArchiveEntryBytes = 256L * 1024 * 1024;
+    private const int MaxArchiveEntryCount = 5000;
+
+    private static readonly HashSet<string> BlockedArchiveExtensions = new(StringComparer.OrdinalIgnoreCase)
+    {
+        ".exe", ".dll", ".bat", ".cmd", ".ps1", ".vbs", ".vbe", ".js", ".jse", ".wsf",
+        ".scr", ".msi", ".com", ".jar", ".sh", ".hta", ".cpl", ".pif"
+    };
+
+    private static void ValidateProjectArchive(string archivePath)
+    {
+        using var archive = ZipFile.OpenRead(archivePath);
+        if (archive.Entries.Count == 0)
+            throw new InvalidDataException("项目包是空的。");
+        if (archive.Entries.Count > MaxArchiveEntryCount)
+            throw new InvalidDataException($"项目包含有 {archive.Entries.Count} 个条目，超过安全上限（{MaxArchiveEntryCount}）。");
+
+        long totalUncompressedBytes = 0;
+        string? manifestProjectFile = null;
+
+        foreach (var entry in archive.Entries)
+        {
+            var entryName = entry.FullName.Replace('\\', '/');
+            if (entryName.Contains("..") || Path.IsPathRooted(entryName))
+                throw new InvalidDataException($"项目包含有非法路径条目：{entryName}");
+            if (BlockedArchiveExtensions.Contains(Path.GetExtension(entryName)))
+                throw new InvalidDataException($"项目包含有不允许的文件类型：{entryName}");
+
+            totalUncompressedBytes += entry.Length;
+            if (entry.Length > MaxArchiveEntryBytes)
+                throw new InvalidDataException($"项目包条目过大：{entryName}");
+            if (totalUncompressedBytes > MaxArchiveUncompressedBytes)
+                throw new InvalidDataException("项目包解压后的总大小超过安全上限。");
+
+            if (string.Equals(entry.Name, "manifest.json", StringComparison.OrdinalIgnoreCase))
+            {
+                using var stream = entry.Open();
+                manifestProjectFile = ReadManifestProjectFile(stream);
+            }
+        }
+
+        // manifest.json is written by current exports; if present, its project file must
+        // exist inside the archive. Missing manifest = legacy package, still allowed.
+        if (manifestProjectFile is not null &&
+            !archive.Entries.Any(entry => string.Equals(
+                entry.FullName.Replace('\\', '/').TrimStart('/'),
+                manifestProjectFile.Replace('\\', '/').TrimStart('/'),
+                StringComparison.OrdinalIgnoreCase)))
+        {
+            throw new InvalidDataException($"项目包 manifest 指向的项目文件缺失：{manifestProjectFile}");
+        }
+    }
+
+    private static string? ReadManifestProjectFile(Stream stream)
+    {
+        try
+        {
+            using var document = JsonDocument.Parse(stream);
+            return document.RootElement.TryGetProperty("projectFile", out var projectFile)
+                ? projectFile.GetString()
+                : null;
+        }
+        catch (JsonException)
+        {
+            throw new InvalidDataException("项目包的 manifest.json 无法解析。");
+        }
     }
 
     private static string ResolveProjectRelativePath(string projectPath, string path)

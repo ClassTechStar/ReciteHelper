@@ -7,8 +7,15 @@ namespace ReciteHelper.Core.Aggregates;
 
 public class Project : AggregateRoot
 {
+    // Bump when the on-disk .rhproj layout changes in a backward-incompatible way
+    // and add a migration branch in ProjectFileService.MigrateSchema.
+    public const int CurrentSchemaVersion = 1;
+
     [JsonConstructor]
     public Project() { }
+
+    [JsonPropertyName("schema_version")]
+    public int SchemaVersion { get; set; }
 
     [JsonPropertyName("name")]
     public string? ProjectName { get; set; }

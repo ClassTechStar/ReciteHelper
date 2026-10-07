@@ -1,5 +1,6 @@
 ﻿using OpenAI;
 using OpenAI.Chat;
+using ReciteHelper.Core.Configuration;
 using ReciteHelper.Core.Entities;
 using ReciteHelper.Core.Interfaces.Configuration;
 using ReciteHelper.Core.Interfaces.Services;
@@ -28,7 +29,59 @@ namespace ReciteHelper.Infrastructure.Services
         private const int MaxConcurrentRequests = 4;
         private const int BatchSize = 10;
 
+        // DeepSeek's documented context window is large; keep the cap named instead
+        // of leaving an unexplained magic number inline.
+        private const int MaxOutputTokenCount = 66666;
+
         private IConfigService configService = cfgService;
+
+        private sealed record EmbeddingMeta(string Provider, string Model);
+
+        /// <summary>
+        /// Persist which embedding source built the store, so a later search with a
+        /// mismatched source (different model/space) can be rejected instead of
+        /// silently returning meaningless similarities.
+        /// </summary>
+        private static void WriteEmbeddingMetadata(string knowledgeBasePath, ConfigOptions cfg)
+        {
+            try
+            {
+                var provider = string.IsNullOrWhiteSpace(cfg.QwenKey) ? "hosted" : "qwen";
+                var meta = new EmbeddingMeta(provider, provider == "qwen" ? cfg.QwenEmbeddingModel : "hosted");
+                File.WriteAllText(
+                    knowledgeBasePath + ".meta.json",
+                    JsonSerializer.Serialize(meta, new JsonSerializerOptions { WriteIndented = true }));
+            }
+            catch (IOException)
+            {
+                // Metadata is a safety net, not a build requirement; the dimension filter
+                // in FileVectorStore.Search still guards mismatched providers.
+            }
+        }
+
+        private static void ValidateEmbeddingCompatibility(FileVectorStore store, ConfigOptions cfg)
+        {
+            var metaPath = store.FilePath + ".meta.json";
+            if (!File.Exists(metaPath))
+                return; // legacy store without metadata; dimension filter still applies
+
+            try
+            {
+                var meta = JsonSerializer.Deserialize<EmbeddingMeta>(File.ReadAllText(metaPath));
+                if (meta is null)
+                    return;
+
+                var currentProvider = string.IsNullOrWhiteSpace(cfg.QwenKey) ? "hosted" : "qwen";
+                if (!string.Equals(meta.Provider, currentProvider, StringComparison.OrdinalIgnoreCase))
+                    throw new InvalidOperationException(
+                        "当前配置的向量模型与知识库构建时使用的模型不一致，检索结果不可用。" +
+                        "请恢复原模型配置，或重建该项目的知识库。");
+            }
+            catch (JsonException)
+            {
+                // Corrupt metadata: fall back to the dimension filter in FileVectorStore.Search.
+            }
+        }
 
         public async Task<FileVectorStore> Build(string projectPath, string text)
         {
@@ -46,17 +99,18 @@ namespace ReciteHelper.Infrastructure.Services
             {
                 _chatClient = new OpenAIClient(new ApiKeyCredential(cfg.DeepSeekKey!), new OpenAIClientOptions
                 {
-                    Endpoint = new Uri("https://api.deepseek.com")
-                }).GetChatClient("deepseek-v4-flash");
+                    Endpoint = new Uri(cfg.DeepSeekApiEndpoint)
+                }).GetChatClient(cfg.DeepSeekChatModel);
             }
 
             if (!string.IsNullOrWhiteSpace(cfg.QwenKey))
-                _embedClient = CreateQwenEmbeddingClient(cfg.QwenKey!);
+                _embedClient = CreateQwenEmbeddingClient(cfg.QwenKey!, cfg);
 
             var cluster = await ClusterAsync(slices, src.Token);
             var embed = await EmbedAsync(cluster, src.Token);
             var elements = BuildVectorEntries(cluster, embed, src.Token);
             var fvs = BuildVectorStore(projectPath, elements);
+            WriteEmbeddingMetadata(projectPath, cfg);
 
             return fvs;
         }
@@ -71,8 +125,10 @@ namespace ReciteHelper.Infrastructure.Services
                 return [];
 
             var cfg = await configService.LoadAsync();
+            ValidateEmbeddingCompatibility(store, cfg);
+
             var queryVector = !string.IsNullOrWhiteSpace(cfg.QwenKey)
-                ? await GenerateQwenEmbeddingAsync(cfg.QwenKey, query.Trim(), cancellationToken)
+                ? await GenerateQwenEmbeddingAsync(cfg.QwenKey, query.Trim(), cfg, cancellationToken)
                 : (await hostedModelService.EmbedTextsAsync([query.Trim()], cancellationToken))[0];
 
             return store.Search(queryVector, topK)
@@ -99,7 +155,7 @@ namespace ReciteHelper.Infrastructure.Services
             if (string.IsNullOrWhiteSpace(cfg.QwenKey))
                 return await hostedModelService.EmbedTextsAsync(normalizedTexts, cancellationToken);
 
-            var embedClient = CreateQwenEmbeddingClient(cfg.QwenKey);
+            var embedClient = CreateQwenEmbeddingClient(cfg.QwenKey, cfg);
             var results = new float[normalizedTexts.Count][];
             var batches = normalizedTexts
                 .Select((text, index) => new { Text = text, Index = index })
@@ -130,22 +186,23 @@ namespace ReciteHelper.Infrastructure.Services
             return results;
         }
 
-        private static EmbeddingClient CreateQwenEmbeddingClient(string qwenKey)
+        private static EmbeddingClient CreateQwenEmbeddingClient(string qwenKey, ConfigOptions cfg)
         {
             return new OpenAIClient(
                 new ApiKeyCredential(qwenKey),
                 new OpenAIClientOptions
                 {
-                    Endpoint = new Uri("https://dashscope.aliyuncs.com/compatible-mode/v1")
-                }).GetEmbeddingClient("text-embedding-v4");
+                    Endpoint = new Uri(cfg.QwenApiEndpoint)
+                }).GetEmbeddingClient(cfg.QwenEmbeddingModel);
         }
 
         private static async Task<float[]> GenerateQwenEmbeddingAsync(
             string qwenKey,
             string text,
+            ConfigOptions cfg,
             CancellationToken cancellationToken)
         {
-            var embedClient = CreateQwenEmbeddingClient(qwenKey);
+            var embedClient = CreateQwenEmbeddingClient(qwenKey, cfg);
             var response = await embedClient.GenerateEmbeddingsAsync(
                 [text],
                 options: null,
@@ -321,7 +378,8 @@ namespace ReciteHelper.Infrastructure.Services
 
         public async Task<Dictionary<Semantics, string>> ClusterAsync(List<string> chunks, CancellationToken cts = default)
         {
-            var results = new ConcurrentDictionary<Semantics, string>();
+            var results = new ConcurrentDictionary<int, (Semantics Semantics, string Text)>();
+            var nextId = -1;
 
             await Parallel.ForEachAsync(chunks,
                 new ParallelOptions { MaxDegreeOfParallelism = MaxConcurrentRequests, CancellationToken = cts },
@@ -330,11 +388,15 @@ namespace ReciteHelper.Infrastructure.Services
                     var segmentedSemantics = await ProcessChunkAsync(chunk);
                     foreach (var item in segmentedSemantics)
                     {
-                        results.TryAdd(item.Item1, item.Item2);
+                        var id = Interlocked.Increment(ref nextId);
+                        item.Item1.Id = id;
+                        results[id] = item;
                     }
                 });
 
-            return results.OrderBy(x => x.Key.Id).ToDictionary(x => x.Key, x => x.Value);
+            return results.Values
+                .OrderBy(x => x.Semantics.Id)
+                .ToDictionary(x => x.Semantics, x => x.Text);
         }
 
         /// <summary>
@@ -367,7 +429,7 @@ namespace ReciteHelper.Infrastructure.Services
             var response = await _chatClient.CompleteChatAsync(messages, new ChatCompletionOptions
             {
                 Temperature = 0.3f,
-                MaxOutputTokenCount = 66666
+                MaxOutputTokenCount = MaxOutputTokenCount
             });
 
             var json = ExtractJsonContent(response.Value.Content[0].Text);
@@ -391,12 +453,12 @@ namespace ReciteHelper.Infrastructure.Services
         }
 
         /// <summary>
-        /// Parse response and return semantics-text pairs with auto-incremented IDs
+        /// Parse response and return semantics-text pairs. Ids are placeholders assigned per chunk;
+        /// ClusterAsync reassigns a run-unique id to every item, so no knowledge point is dropped here.
         /// </summary>
         private static List<(Semantics, string)> ParseResponse(string json)
         {
             var result = new List<(Semantics, string)>();
-            var idCounter = 0;
 
             using var doc = JsonDocument.Parse(json);
             var array = doc.RootElement.EnumerateArray().ToList();
@@ -412,7 +474,6 @@ namespace ReciteHelper.Infrastructure.Services
 
                 var semantics = new Semantics
                 {
-                    Id = idCounter++,
                     Tags = item.TryGetProperty("tags", out var tags)
                         ? tags.EnumerateArray()
                             .Select(t => t.GetString() ?? "")
@@ -537,9 +598,8 @@ namespace ReciteHelper.Infrastructure.Services
                 })
                 .ToList();
 
-            Console.WriteLine($"知识库已构建：{entries.Count} 个向量。");
-            return entries;
-        }
+        return entries;
+    }
 
         public FileVectorStore BuildVectorStore(string projectPath, List<VectorEntry> entries)
         {

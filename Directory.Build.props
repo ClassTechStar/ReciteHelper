@@ -1,0 +1,13 @@
+<Project>
+
+  <!--
+    Shared build properties. A Directory.Build.props at the repository root also
+    applies to the external/AquaAvgFramework submodule; keep entries harmless there.
+  -->
+  <PropertyGroup>
+    <Version Condition="'$(Version)' == ''">5.1.0</Version>
+    <Company>ReciteHelper</Company>
+    <Product>ReciteHelper</Product>
+  </PropertyGroup>
+
+</Project>

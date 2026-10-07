@@ -3,6 +3,7 @@ using ReciteHelper.Core.Interfaces.Services;
 using ReciteHelper.Core.Aggregates;
 using ReciteHelper.Core.Entities;
 using ReciteHelper.Core.Enums;
+using ReciteHelper.Core.Services;
 using ReciteHelper.Core.ValueObjects;
 using ReciteHelper.Infrastructure.Utilities;
 using System.Collections.Concurrent;
@@ -21,10 +22,23 @@ public sealed partial class ProjectCreationService : IProjectCreationService
     private const float NearDuplicateChapterSimilarity = 0.75f;
     private const int MinPreferredChapterCount = 6;
     private const int MaxPreferredChapterCount = 12;
+    // Bounds the total LLM cost of a single creation run: each chunk is sent at most
+    // 1 + MaxChunkRetryRounds times before it is skipped and surfaced in the warning.
+    private const int MaxChunkRetryRounds = 3;
+    private const int MaxStructuredChunkAttempts = 2;
     private static readonly JsonSerializerOptions JsonOptions = new()
     {
         PropertyNameCaseInsensitive = true
     };
+
+    // Delegations to the extracted collaborators (see GeneratedQuestionNormalizer /
+    // SourceChapterParser); kept so the orchestration call sites stay unchanged.
+    private static void NormalizeGeneratedQuestions(List<Chapter> chapters) => GeneratedQuestionNormalizer.Normalize(chapters);
+    private static string CreateKnowledgePointName(string text) => GeneratedQuestionNormalizer.CreateKnowledgePointName(text);
+    private static bool ContainsExplicitChapterMarkers(string text) => SourceChapterParser.ContainsExplicitChapterMarkers(text);
+    private static SourceChapterSplit SplitSourceChaptersLocally(string text) => SourceChapterParser.SplitLocally(text);
+    private static string CleanChapterName(string? name) => SourceChapterParser.CleanChapterName(name);
+
 
     private readonly IPromptProvider _promptProvider;
     private readonly IProjectFileService _projectFileService;
@@ -529,49 +543,6 @@ public sealed partial class ProjectCreationService : IProjectCreationService
         }
     }
 
-    private static SourceChapterSplit SplitSourceChaptersLocally(string text)
-    {
-        if (string.IsNullOrWhiteSpace(text))
-            return SourceChapterSplit.Empty;
-
-        var matches = ExplicitChapterHeadingRegex().Matches(text);
-        if (matches.Count == 0)
-            return SourceChapterSplit.Empty;
-
-        var markers = matches
-            .Cast<Match>()
-            .Select(match => new SourceChapterMarker(
-                match.Groups["heading"].Index,
-                CleanChapterName(match.Groups["heading"].Value),
-                NormalizeChapterOrdinal(match.Groups["ordinal"].Value),
-                ParseChapterNumber(match.Groups["ordinal"].Value)))
-            .Where(marker => marker.Index >= 0 &&
-                             !string.IsNullOrWhiteSpace(marker.Heading) &&
-                             !string.IsNullOrWhiteSpace(marker.Ordinal) &&
-                             marker.Number is > 0)
-            .OrderBy(marker => marker.Index)
-            .ToList();
-        if (markers.Count == 0)
-            return SourceChapterSplit.Empty;
-
-        var chapters = new List<SourceChapter>();
-        var preface = text[..markers[0].Index].Trim();
-        if (preface.Length >= StructuredChapterChunkSize / 2)
-            chapters.Add(new SourceChapter(InferPrefaceChapterName(preface), preface, 0));
-
-        for (var index = 0; index < markers.Count; index++)
-        {
-            var marker = markers[index];
-            var nextIndex = index + 1 < markers.Count ? markers[index + 1].Index : text.Length;
-            var name = CleanChapterName(marker.Heading);
-            var content = text[marker.Index..nextIndex].Trim();
-            if (!string.IsNullOrWhiteSpace(name) && !string.IsNullOrWhiteSpace(content))
-                chapters.Add(new SourceChapter(name, content, marker.Number));
-        }
-
-        return new SourceChapterSplit(chapters, IsCompleteContinuousChapterSequence(markers));
-    }
-
     private static List<SourceChapter> ChooseStructuredChapterSplit(
         List<SourceChapter> aiChapters,
         List<SourceChapter> localChapters,
@@ -646,96 +617,6 @@ public sealed partial class ProjectCreationService : IProjectCreationService
             StringComparison.OrdinalIgnoreCase);
     }
 
-    private static bool IsCompleteContinuousChapterSequence(IReadOnlyList<SourceChapterMarker> markers)
-    {
-        var numbers = markers
-            .Select(marker => marker.Number)
-            .Where(number => number is > 0)
-            .Select(number => number!.Value)
-            .Distinct()
-            .Order()
-            .ToList();
-        if (numbers.Count == 0 || numbers[0] != 1)
-            return false;
-
-        for (var index = 0; index < numbers.Count; index++)
-        {
-            if (numbers[index] != index + 1)
-                return false;
-        }
-
-        return true;
-    }
-
-    private static int? ParseChapterNumber(string value)
-    {
-        var normalized = NormalizeChapterOrdinal(value);
-        if (string.IsNullOrWhiteSpace(normalized))
-            return null;
-        if (int.TryParse(normalized, out var numeric))
-            return numeric;
-
-        return ChineseNumberToInt(normalized);
-    }
-
-    private static int? ChineseNumberToInt(string text)
-    {
-        text = text.Replace("〇", "零", StringComparison.Ordinal)
-            .Replace("两", "二", StringComparison.Ordinal);
-
-        var map = new Dictionary<char, int>
-        {
-            ['零'] = 0,
-            ['一'] = 1,
-            ['二'] = 2,
-            ['三'] = 3,
-            ['四'] = 4,
-            ['五'] = 5,
-            ['六'] = 6,
-            ['七'] = 7,
-            ['八'] = 8,
-            ['九'] = 9
-        };
-
-        var result = 0;
-        var section = 0;
-        var number = 0;
-        foreach (var character in text)
-        {
-            if (map.TryGetValue(character, out var mapped))
-            {
-                number = mapped;
-                continue;
-            }
-
-            switch (character)
-            {
-                case '十':
-                    section += (number == 0 ? 1 : number) * 10;
-                    number = 0;
-                    break;
-                case '百':
-                    section += (number == 0 ? 1 : number) * 100;
-                    number = 0;
-                    break;
-                case '千':
-                    section += (number == 0 ? 1 : number) * 1000;
-                    number = 0;
-                    break;
-                case '万':
-                    result += (section + number) * 10000;
-                    section = 0;
-                    number = 0;
-                    break;
-                default:
-                    return null;
-            }
-        }
-
-        var total = result + section + number;
-        return total > 0 ? total : null;
-    }
-
     private static string CreateChapterSimilaritySample(string text)
     {
         var normalized = WhitespaceRegex().Replace(text ?? string.Empty, " ").Trim();
@@ -767,23 +648,6 @@ public sealed partial class ProjectCreationService : IProjectCreationService
         return dot / (float)(Math.Sqrt(leftMagnitude) * Math.Sqrt(rightMagnitude));
     }
 
-    private static string NormalizeChapterOrdinal(string value)
-    {
-        return WhitespaceRegex().Replace(value ?? string.Empty, string.Empty).Trim();
-    }
-
-    private static string InferPrefaceChapterName(string preface)
-    {
-        var firstMeaningfulLine = preface
-            .Split(['\r', '\n'], StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries)
-            .FirstOrDefault(line => line.Contains("绪论", StringComparison.Ordinal) ||
-                                    line.Contains("导论", StringComparison.Ordinal));
-        if (!string.IsNullOrWhiteSpace(firstMeaningfulLine))
-            return CleanChapterName(firstMeaningfulLine.Length <= 40 ? firstMeaningfulLine : firstMeaningfulLine[..40]);
-
-        return "绪论";
-    }
-
     private async Task<Chapter> GenerateQuestionsForStructuredChapterAsync(
         string chapterName,
         IReadOnlyList<Chunk> chunks,
@@ -805,6 +669,7 @@ public sealed partial class ProjectCreationService : IProjectCreationService
         var prompt = await _promptProvider.GetPromptAsync("GenerateQuestion.txt");
         var progressValue = 0;
         var generatedChapters = new ConcurrentBag<List<Chapter>>();
+        var failedChunks = 0;
 
         var parallelOptions = new ParallelOptions
         {
@@ -813,6 +678,7 @@ public sealed partial class ProjectCreationService : IProjectCreationService
 
         await Parallel.ForEachAsync(chunks, parallelOptions, async (chunk, _) =>
         {
+            List<Chapter>? generated = null;
             try
             {
                 var structuredPrompt = $$"""
@@ -826,21 +692,41 @@ public sealed partial class ProjectCreationService : IProjectCreationService
                 {{chunk.Content}}
                 </chapter_chunk>
                 """;
-                var response = await RunChatAsync(deepSeekKey, structuredPrompt);
-                var json = ExtractJsonContent(response);
-                if (string.IsNullOrWhiteSpace(json))
-                    return;
 
-                var generated = JsonSerializer.Deserialize<List<Chapter>>(json, JsonOptions);
-                if (generated is null)
-                    return;
+                // A transient network/parse failure should not silently drop a whole
+                // chapter chunk; retry once before giving up on it.
+                for (var attempt = 1; attempt <= MaxStructuredChunkAttempts; attempt++)
+                {
+                    try
+                    {
+                        var response = await RunChatAsync(deepSeekKey, structuredPrompt);
+                        var json = ExtractJsonContent(response);
+                        if (string.IsNullOrWhiteSpace(json))
+                            continue;
 
-                NormalizeGeneratedQuestions(generated);
-                generatedChapters.Add(generated);
+                        generated = JsonSerializer.Deserialize<List<Chapter>>(json, JsonOptions);
+                        break;
+                    }
+                    catch (Exception ex) when (attempt < MaxStructuredChunkAttempts)
+                    {
+                        Debug.WriteLine($"Structured chunk {chunk.Index} attempt {attempt} failed: {ex.Message}");
+                    }
+                }
+
+                if (generated is not null)
+                {
+                    NormalizeGeneratedQuestions(generated);
+                    generatedChapters.Add(generated);
+                }
+                else
+                {
+                    Interlocked.Increment(ref failedChunks);
+                }
             }
             catch (Exception ex)
             {
-                Debug.WriteLine($"Failed to generate structured chapter chunk: {ex.Message}");
+                Interlocked.Increment(ref failedChunks);
+                Debug.WriteLine($"Failed to generate structured chapter chunk {chunk.Index}: {ex.Message}");
             }
             finally
             {
@@ -870,6 +756,22 @@ public sealed partial class ProjectCreationService : IProjectCreationService
             }
         }
 
+        if (failedChunks > 0)
+        {
+            Debug.WriteLine($"Chapter '{chapterName}': {failedChunks}/{chunks.Count} chunk(s) failed after retries.");
+            Report(
+                progress,
+                null,
+                null,
+                null,
+                null,
+                null,
+                null,
+                $"章节“{chapterName}”有 {failedChunks} 个文本块生成失败，已跳过。",
+                ProjectCreationStage.TextClustering,
+                usesSourceChapters: true);
+        }
+
         return result;
     }
 
@@ -890,14 +792,14 @@ public sealed partial class ProjectCreationService : IProjectCreationService
     private async Task<Replay> SendChunksAsync(
         List<Chunk> chunks,
         string deepSeekKey,
-        IProgress<ProjectCreationProgress>? progress)
+        IProgress<ProjectCreationProgress>? progress,
+        ConcurrentDictionary<int, string>? chunkErrors = null)
     {
         var sendChunks = chunks;
         var allChapter = new ConcurrentBag<List<Chapter>>();
         var succeededIndexes = new ConcurrentBag<int>();
         var progressValue = 0;
         var prompt = await _promptProvider.GetPromptAsync("GenerateQuestion.txt");
-
         var parallelOptions = new ParallelOptions
         {
             MaxDegreeOfParallelism = 16
@@ -926,7 +828,8 @@ public sealed partial class ProjectCreationService : IProjectCreationService
             }
             catch (Exception ex)
             {
-                Debug.WriteLine($"Failed to generate chunk: {ex.Message}");
+                Debug.WriteLine($"Failed to generate chunk {chunk.Index}: {ex.Message}");
+                chunkErrors?.TryAdd(chunk.Index, ex.Message);
             }
         });
 
@@ -970,273 +873,6 @@ public sealed partial class ProjectCreationService : IProjectCreationService
         return trimmed;
     }
 
-    private static bool ContainsExplicitChapterMarkers(string text)
-    {
-        return ExplicitChapterHeadingRegex().Matches(text ?? string.Empty)
-            .Cast<Match>()
-            .Select(match => NormalizeChapterOrdinal(match.Groups["ordinal"].Value))
-            .Where(ordinal => !string.IsNullOrWhiteSpace(ordinal))
-            .Distinct(StringComparer.OrdinalIgnoreCase)
-            .Count() >= 2;
-    }
-
-    private static void NormalizeGeneratedQuestions(List<Chapter> chapters)
-    {
-        foreach (var chapter in chapters)
-        {
-            if (chapter.Questions is null || chapter.Questions.Count == 0)
-                continue;
-
-            RepairSplitChoiceOptions(chapter.Questions);
-            NormalizeMalformedChoiceQuestions(chapter.Questions);
-            NormalizeGeneratedQuestionTypes(chapter.Questions);
-            RemoveDeclarativeShortAnswerQuestions(chapter);
-        }
-    }
-
-    private static void RemoveDeclarativeShortAnswerQuestions(Chapter chapter)
-    {
-        if (chapter.Questions is null || chapter.Questions.Count == 0)
-            return;
-
-        chapter.KnowledgePoints ??= [];
-        var validQuestions = new List<Question>();
-
-        foreach (var question in chapter.Questions)
-        {
-            question.Text = question.Text?.Trim();
-            question.CorrectAnswer = question.CorrectAnswer?.Trim();
-
-            if (string.IsNullOrWhiteSpace(question.Text))
-                continue;
-
-            if (question.IsSingleChoice || IsValidGeneratedQuestion(question))
-            {
-                validQuestions.Add(question);
-                continue;
-            }
-
-            if (TryConvertDeclarativeSentenceToBlank(question))
-            {
-                validQuestions.Add(question);
-                continue;
-            }
-
-            chapter.KnowledgePoints.Add(KnowledgePoint.Create(
-                CreateKnowledgePointName(question.Text),
-                question.Text));
-        }
-
-        chapter.Questions = validQuestions;
-    }
-
-    private static bool IsValidGeneratedQuestion(Question question)
-    {
-        if (string.IsNullOrWhiteSpace(question.CorrectAnswer) && question.GetCorrectAnswers().Count == 0)
-            return false;
-
-        return question.Type switch
-        {
-            QuestionType.FillBlank =>
-                BlankRegex().Matches(question.Text ?? string.Empty).Count is var blankCount &&
-                blankCount > 0 &&
-                blankCount == question.GetCorrectAnswers().Count,
-            QuestionType.TermDefinition => (question.Text ?? string.Empty).StartsWith("名词解释", StringComparison.Ordinal),
-            QuestionType.Essay => IsValidShortAnswerStem(question.Text ?? string.Empty),
-            _ => false
-        };
-    }
-
-    private static bool IsValidShortAnswerStem(string text)
-    {
-        if (BlankRegex().IsMatch(text) || text.Contains('?') || text.Contains('？'))
-            return true;
-
-        return ShortAnswerPromptRegex().IsMatch(text);
-    }
-
-    private static bool TryConvertDeclarativeSentenceToBlank(Question question)
-    {
-        var text = question.Text?.Trim();
-        var answer = question.CorrectAnswer?.Trim();
-        if (string.IsNullOrWhiteSpace(text) || string.IsNullOrWhiteSpace(answer))
-            return false;
-
-        if (string.Equals(text, answer, StringComparison.OrdinalIgnoreCase))
-            return false;
-
-        var index = text.IndexOf(answer, StringComparison.OrdinalIgnoreCase);
-        if (index < 0)
-            return false;
-
-        var remainingLength = text.Length - answer.Length;
-        if (answer.Length < 2 || remainingLength < 4)
-            return false;
-
-        question.Text = text.Remove(index, answer.Length).Insert(index, "________");
-        question.Type = QuestionType.FillBlank;
-        question.CorrectAnswers = [answer];
-        return IsValidShortAnswerStem(question.Text);
-    }
-
-    private static void NormalizeGeneratedQuestionTypes(List<Question> questions)
-    {
-        questions.RemoveAll(question => question.Type == QuestionType.TrueFalse);
-
-        foreach (var question in questions)
-        {
-            question.CorrectAnswer = question.CorrectAnswer?.Trim();
-            question.CorrectAnswers = question.CorrectAnswers
-                .Where(answer => !string.IsNullOrWhiteSpace(answer))
-                .Select(answer => answer.Trim())
-                .ToList();
-
-            if (question.Type == QuestionType.FillBlank && question.CorrectAnswers.Count == 0 &&
-                !string.IsNullOrWhiteSpace(question.CorrectAnswer))
-            {
-                question.CorrectAnswers = [question.CorrectAnswer];
-            }
-
-            if (question.Type == QuestionType.TermDefinition &&
-                !string.IsNullOrWhiteSpace(question.Text) &&
-                !question.Text.StartsWith("名词解释", StringComparison.Ordinal))
-            {
-                question.Text = $"名词解释：{question.Text.Trim().TrimEnd('。', '？', '?')}";
-            }
-
-            if (question.Type != QuestionType.SingleChoice)
-            {
-                question.Options = [];
-                question.CorrectOptionIds = [];
-            }
-
-            if (question.Type != QuestionType.FillBlank)
-                question.CorrectAnswers = [];
-        }
-    }
-
-    private static string CreateKnowledgePointName(string text)
-    {
-        var normalized = WhitespaceRegex().Replace(text, " ").Trim();
-        return normalized.Length <= 32 ? normalized : normalized[..32];
-    }
-
-    private static void RepairSplitChoiceOptions(List<Question> questions)
-    {
-        for (var i = 0; i <= questions.Count - 5; i++)
-        {
-            var stem = questions[i];
-            if (stem.Options.Count > 0 || LooksLikeOptionOnlyQuestion(stem, null, out _))
-                continue;
-
-            var parsedOptions = new List<QuestionOption>();
-            var expectedIds = new[] { "A", "B", "C", "D" };
-            var matched = true;
-
-            for (var offset = 0; offset < expectedIds.Length; offset++)
-            {
-                var optionQuestion = questions[i + offset + 1];
-                if (!LooksLikeOptionOnlyQuestion(optionQuestion, expectedIds[offset], out var optionText))
-                {
-                    matched = false;
-                    break;
-                }
-
-                parsedOptions.Add(new QuestionOption
-                {
-                    Id = expectedIds[offset],
-                    Text = optionText
-                });
-            }
-
-            if (!matched)
-                continue;
-
-            var correctOptionIds = ResolveCorrectOptionIds(stem, parsedOptions);
-            if (correctOptionIds.Count == 0)
-                continue;
-
-            stem.Type = QuestionType.SingleChoice;
-            stem.Options = parsedOptions;
-            stem.CorrectOptionIds = correctOptionIds;
-            stem.CorrectAnswer = correctOptionIds[0];
-
-            questions.RemoveRange(i + 1, 4);
-        }
-    }
-
-    private static void NormalizeMalformedChoiceQuestions(List<Question> questions)
-    {
-        foreach (var question in questions.Where(question => question.Type == QuestionType.SingleChoice))
-        {
-            question.Options = question.Options
-                .Where(option => !string.IsNullOrWhiteSpace(option.Id) && !string.IsNullOrWhiteSpace(option.Text))
-                .GroupBy(option => QuestionOption.NormalizeId(option.Id))
-                .Select(group => new QuestionOption
-                {
-                    Id = group.Key,
-                    Text = group.First().Text.Trim()
-                })
-                .ToList();
-
-            question.CorrectOptionIds = ResolveCorrectOptionIds(question, question.Options);
-
-            if (question.Options.Count == 0 || question.CorrectOptionIds.Count == 0)
-            {
-                question.Type = QuestionType.Essay;
-                question.Options = [];
-                question.CorrectOptionIds = [];
-            }
-        }
-    }
-
-    private static List<string> ResolveCorrectOptionIds(Question question, List<QuestionOption> options)
-    {
-        var ids = question.GetCorrectOptionIds()
-            .Where(id => options.Any(option => QuestionOption.NormalizeId(option.Id) == id))
-            .ToList();
-
-        if (ids.Count > 0)
-            return ids;
-
-        var correctAnswer = question.CorrectAnswer?.Trim();
-        if (string.IsNullOrWhiteSpace(correctAnswer))
-            return [];
-
-        var matchingOption = options.FirstOrDefault(option =>
-            string.Equals(option.Text.Trim(), correctAnswer, StringComparison.OrdinalIgnoreCase) ||
-            string.Equals(option.DisplayText.Trim(), correctAnswer, StringComparison.OrdinalIgnoreCase));
-
-        return matchingOption is null ? [] : [QuestionOption.NormalizeId(matchingOption.Id)];
-    }
-
-    private static bool LooksLikeOptionOnlyQuestion(Question question, string? expectedId, out string optionText)
-    {
-        optionText = string.Empty;
-        if (!string.IsNullOrWhiteSpace(question.CorrectAnswer) || question.Options.Count > 0)
-            return false;
-
-        var match = OptionOnlyRegex().Match(question.Text ?? string.Empty);
-        if (!match.Success)
-            return false;
-
-        var optionId = QuestionOption.NormalizeId(match.Groups["id"].Value);
-        if (!string.IsNullOrWhiteSpace(expectedId) && optionId != expectedId)
-            return false;
-
-        optionText = match.Groups["text"].Value.Trim();
-        return !string.IsNullOrWhiteSpace(optionText);
-    }
-
-    [GeneratedRegex(@"^\s*\(?\s*(?<id>[A-Da-d])\s*\)?\s*[\.、:：\)]\s*(?<text>.+?)\s*$")]
-    private static partial Regex OptionOnlyRegex();
-
-    [GeneratedRegex(@"_{2,}|＿{2,}|-{3,}")]
-    private static partial Regex BlankRegex();
-
-    [GeneratedRegex(@"^\s*(名词解释|简述|说明|分析|比较|阐述|试述|论述|列举|举例|概括|描述|解释|指出|写出|回答|判断|计算|请|问)|(为什么|为何|如何|怎样|哪些|哪种|哪个|什么|是否|能否)")]
-    private static partial Regex ShortAnswerPromptRegex();
-
     [GeneratedRegex(@"\s+")]
     private static partial Regex WhitespaceRegex();
 
@@ -1252,18 +888,6 @@ public sealed partial class ProjectCreationService : IProjectCreationService
     [GeneratedRegex(@"^(问题|答案|题目|章节|知识|内容|资料|学习|复习|概念|定义|特点|作用|原因|过程|分类|包括|主要|相关|进行|分析|说明|简述|论述|the|and|for|with)$", RegexOptions.IgnoreCase)]
     private static partial Regex CommonTopicWordRegex();
 
-    [GeneratedRegex(@"(?m)(?:^|(?<=[\r\n。！？；;：:])\s*)(?<heading>第\s*(?<ordinal>(?:[一二三四五六七八九十百千万〇零两\d]\s*){1,8})章[^\r\n]{0,60})")]
-    private static partial Regex ExplicitChapterHeadingRegex();
-
-    private sealed record SourceChapter(string Name, string Content, int? Number = null);
-
-    private sealed record SourceChapterMarker(int Index, string Heading, string Ordinal, int? Number);
-
-    private sealed record SourceChapterSplit(List<SourceChapter> Chapters, bool IsCompleteContinuous)
-    {
-        public static SourceChapterSplit Empty { get; } = new([], false);
-    }
-
     private async Task<List<List<Chapter>>> MergeChunksAsync(
         List<Chunk> chunks,
         string deepSeekKey,
@@ -1271,15 +895,35 @@ public sealed partial class ProjectCreationService : IProjectCreationService
         IProgress<ProjectCreationProgress>? progress)
     {
         var result = new List<List<Chapter>>();
+        var chunkErrors = new ConcurrentDictionary<int, string>();
+        var round = 0;
 
         while (true)
         {
-            var replay = await SendChunksAsync(chunks, deepSeekKey, progress);
+            round++;
+            var replay = await SendChunksAsync(chunks, deepSeekKey, progress, chunkErrors);
             var failed = replay.Chunks.Where(chunk => !chunk.IsSuccess).ToList();
 
             result.AddRange(replay.Chapters);
             if (failed.Count == 0 || missingStrategy == MissingStrategy.Ignore)
                 break;
+
+            if (round >= MaxChunkRetryRounds)
+            {
+                var firstErrors = string.Join("；", chunkErrors.Values.Distinct().Take(3));
+                Debug.WriteLine($"Chunk generation gave up after {round} rounds; {failed.Count} chunk(s) skipped. Errors: {firstErrors}");
+                Report(
+                    progress,
+                    null,
+                    null,
+                    null,
+                    null,
+                    null,
+                    null,
+                    $"部分文本块在重试 {round} 轮后仍生成失败，已跳过 {failed.Count} 块，其余内容不受影响。",
+                    ProjectCreationStage.KnowledgeExtraction);
+                break;
+            }
 
             chunks = [.. failed];
         }
@@ -1328,11 +972,23 @@ public sealed partial class ProjectCreationService : IProjectCreationService
             return LimitChapterCount(FlattenGeneratedChapters(allChapter));
 
         var prompt = await BuildChapterClusterPromptAsync(chapterNames, existingChapterNames, allowNewChapters);
-        var clusterResult = await RunChatAsync(deepSeekKey, prompt);
-        var jsonContent = ExtractJsonContent(clusterResult);
-        var cluster = string.IsNullOrWhiteSpace(jsonContent)
-            ? []
-            : JsonSerializer.Deserialize<List<ChapterCluster>>(jsonContent, JsonOptions) ?? [];
+
+        List<ChapterCluster> cluster;
+        try
+        {
+            var clusterResult = await RunChatAsync(deepSeekKey, prompt);
+            var jsonContent = ExtractJsonContent(clusterResult);
+            cluster = string.IsNullOrWhiteSpace(jsonContent)
+                ? []
+                : JsonSerializer.Deserialize<List<ChapterCluster>>(jsonContent, JsonOptions) ?? [];
+        }
+        catch (Exception ex)
+        {
+            // Clustering is an organizational step; fall back to the flat layout
+            // instead of discarding questions that were already paid for.
+            Debug.WriteLine($"Failed to cluster generated chapters: {ex.Message}");
+            cluster = [];
+        }
 
         if (cluster.Count == 0)
             return allowNewChapters
@@ -1519,13 +1175,6 @@ public sealed partial class ProjectCreationService : IProjectCreationService
         }
 
         return null;
-    }
-
-    private static string CleanChapterName(string? name)
-    {
-        var cleaned = WhitespaceRegex().Replace(name ?? string.Empty, " ").Trim();
-        cleaned = cleaned.Trim(' ', '：', ':', '-', '—');
-        return cleaned;
     }
 
     private static bool IsGenericChapterName(string? name)

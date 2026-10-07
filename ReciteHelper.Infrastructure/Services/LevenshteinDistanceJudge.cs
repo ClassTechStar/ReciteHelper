@@ -1,4 +1,3 @@
-using FuzzyString;
 using ReciteHelper.Core.Interfaces.Services;
 using ReciteHelper.Infrastructure.Algorithms;
 
@@ -58,19 +57,10 @@ public class LevenshteinDistanceJudge : IAnswerJudge
 
         return Task.Run(() =>
         {
-            var tolerance = FuzzyStringComparisonTolerance.Strong;
-            var comparisonOptions = new List<FuzzyStringComparisonOptions>
-        {
-            FuzzyStringComparisonOptions.UseOverlapCoefficient,
-            FuzzyStringComparisonOptions.UseLongestCommonSubsequence,
-            FuzzyStringComparisonOptions.UseLongestCommonSubstring
-        };
-
             var similarity = new CosineSimilarity();
             var score = similarity.Calculate(userAnswer, correctAnswer);
 
-            bool isCorrect = userAnswer.ApproximatelyEquals(
-                correctAnswer, comparisonOptions, tolerance);
+            var isCorrect = TextSimilarity.ApproximatelyEquals(userAnswer, correctAnswer);
 
             if (userAnswer.Length >= 15) score -= .2d;
 

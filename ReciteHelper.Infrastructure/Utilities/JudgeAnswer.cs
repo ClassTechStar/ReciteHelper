@@ -1,4 +1,3 @@
-using FuzzyString;
 using ReciteHelper.Core.Entities;
 using ReciteHelper.Infrastructure.Algorithms;
 
@@ -14,18 +13,10 @@ public static class JudgeAnswer
         if (string.IsNullOrEmpty(userAnswer))
             return false;
 
-        var tolerance = FuzzyStringComparisonTolerance.Strong;
-        var comparisonOptions = new List<FuzzyStringComparisonOptions>
-        {
-            FuzzyStringComparisonOptions.UseOverlapCoefficient,
-            FuzzyStringComparisonOptions.UseLongestCommonSubsequence,
-            FuzzyStringComparisonOptions.UseLongestCommonSubstring
-        };
-
         var similarity = new CosineSimilarity();
         var score = similarity.Calculate(userAnswer, correctAnswer);
 
-        var isCorrect = userAnswer.ApproximatelyEquals(correctAnswer, comparisonOptions, tolerance);
+        var isCorrect = TextSimilarity.ApproximatelyEquals(userAnswer, correctAnswer);
         if (userAnswer.Length >= 15)
             score -= .2d;
 
@@ -97,28 +88,5 @@ public static class JudgeAnswer
         }
 
         return distances[sourceLength, targetLength];
-    }
-
-    public static void UpdateEFValue(Question question, int qScore)
-    {
-        if (question.ReviewTag.Count < 2)
-            return;
-
-        var oldEF = question.EFValue;
-        double newEF;
-
-        if (qScore >= 3)
-        {
-            var factor = 0.1 - (5 - qScore) * (0.08 + (5 - qScore) * 0.02);
-            newEF = oldEF + factor;
-            newEF = Math.Max(1.3, newEF);
-        }
-        else
-        {
-            newEF = oldEF - 0.2;
-            newEF = Math.Max(1.3, newEF);
-        }
-
-        question.EFValue = Math.Round(newEF, 2);
     }
 }

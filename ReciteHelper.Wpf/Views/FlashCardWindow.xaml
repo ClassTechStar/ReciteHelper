@@ -1,0 +1,123 @@
+<Window
+    x:Class="ReciteHelper.Wpf.Views.FlashCardWindow"
+    xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+    xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+    Title="卡片学习"
+    Width="760"
+    Height="560"
+    Background="#F5F7F9"
+    WindowStartupLocation="CenterOwner"
+    mc:Ignorable="d"
+    xmlns:d="http://schemas.microsoft.com/expression/blend/2008"
+    xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006">
+
+    <Window.Resources>
+        <Style x:Key="PrimaryButtonStyle" TargetType="Button">
+            <Setter Property="Background" Value="#007ACC" />
+            <Setter Property="Foreground" Value="White" />
+            <Setter Property="BorderThickness" Value="0" />
+            <Setter Property="Padding" Value="18,9" />
+            <Setter Property="FontSize" Value="13" />
+            <Setter Property="FontWeight" Value="SemiBold" />
+            <Setter Property="Cursor" Value="Hand" />
+            <Setter Property="MinWidth" Value="96" />
+        </Style>
+        <Style x:Key="KnowButtonStyle" TargetType="Button" BasedOn="{StaticResource PrimaryButtonStyle}">
+            <Setter Property="Background" Value="#1F8A4C" />
+        </Style>
+        <Style x:Key="DontKnowButtonStyle" TargetType="Button" BasedOn="{StaticResource PrimaryButtonStyle}">
+            <Setter Property="Background" Value="#C0392B" />
+        </Style>
+        <Style x:Key="SecondaryButtonStyle" TargetType="Button" BasedOn="{StaticResource PrimaryButtonStyle}">
+            <Setter Property="Background" Value="Transparent" />
+            <Setter Property="Foreground" Value="#475569" />
+            <Setter Property="BorderBrush" Value="#CBD5E1" />
+            <Setter Property="BorderThickness" Value="1" />
+        </Style>
+    </Window.Resources>
+
+    <Grid>
+        <Grid.RowDefinitions>
+            <RowDefinition Height="Auto" />
+            <RowDefinition Height="*" />
+            <RowDefinition Height="Auto" />
+        </Grid.RowDefinitions>
+
+        <Border Padding="26,22" Background="White" BorderBrush="#E2E8F0" BorderThickness="0,0,0,1">
+            <StackPanel>
+                <TextBlock FontSize="22" FontWeight="SemiBold" Foreground="#0F172A" Text="卡片学习" />
+                <TextBlock
+                    x:Name="ProgressText"
+                    Margin="0,8,0,0"
+                    FontSize="13"
+                    Foreground="#64748B" />
+            </StackPanel>
+        </Border>
+
+        <Border
+            Grid.Row="1"
+            Margin="26,20"
+            Padding="34,30"
+            Background="White"
+            BorderBrush="#E2E8F0"
+            BorderThickness="1"
+            CornerRadius="10">
+            <StackPanel>
+                <TextBlock
+                    x:Name="QuestionTypeText"
+                    FontSize="12"
+                    Foreground="#007ACC"
+                    FontWeight="SemiBold" />
+                <TextBlock
+                    x:Name="QuestionText"
+                    Margin="0,14,0,0"
+                    FontSize="19"
+                    FontWeight="SemiBold"
+                    Foreground="#0F172A"
+                    TextWrapping="Wrap" />
+                <TextBlock
+                    x:Name="AnswerText"
+                    Margin="0,20,0,0"
+                    FontSize="15"
+                    Foreground="#1F8A4C"
+                    TextWrapping="Wrap"
+                    Visibility="Collapsed" />
+            </StackPanel>
+        </Border>
+
+        <Border
+            Grid.Row="2"
+            Padding="26,18"
+            Background="White"
+            BorderBrush="#E2E8F0"
+            BorderThickness="0,1,0,0">
+            <StackPanel Orientation="Horizontal" HorizontalAlignment="Center">
+                <Button
+                    x:Name="RevealButton"
+                    Click="RevealButton_Click"
+                    Content="翻转卡片"
+                    Style="{StaticResource PrimaryButtonStyle}" />
+                <Button
+                    x:Name="KnowButton"
+                    Margin="12,0,0,0"
+                    Click="KnowButton_Click"
+                    Content="认识"
+                    Style="{StaticResource KnowButtonStyle}"
+                    Visibility="Collapsed" />
+                <Button
+                    x:Name="DontKnowButton"
+                    Margin="12,0,0,0"
+                    Click="DontKnowButton_Click"
+                    Content="不认识"
+                    Style="{StaticResource DontKnowButtonStyle}"
+                    Visibility="Collapsed" />
+                <Button
+                    x:Name="SkipButton"
+                    Margin="12,0,0,0"
+                    Click="SkipButton_Click"
+                    Content="跳过"
+                    Style="{StaticResource SecondaryButtonStyle}" />
+            </StackPanel>
+        </Border>
+    </Grid>
+</Window>

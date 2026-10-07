@@ -16,20 +16,22 @@ ReciteHelper 是一款面向考试复习、课程学习与知识整理的 AI 桌
 
 ## 使用之前
 
-### 配置 API Key
+### 配置文件
 
-打开程序目录中的 `Config.xml`。推荐配置结构如下：
+从 v5.1 起，配置文件优先存放于 `%APPDATA%\ReciteHelper\Config.xml`。首次运行新版本时，程序会自动把安装目录下的旧 `Config.xml` 迁移到该位置（安装目录通常没有写权限，例如 Program Files）。此后修改配置请编辑 `%APPDATA%` 下的文件。
+
+推荐配置结构如下：
 
 ```xml
 <Config>
     <Version>2</Version>
 
-    <DeepSeekKey>%Environment.GetEnvironmentVariable("DSAPI")%</DeepSeekKey>
-    <QwenKey>%Environment.GetEnvironmentVariable("QWEN_API_KEY")%</QwenKey>
+    <DeepSeekKey>%Environment.GetEnvironmentVariable("RECITEHELPER_DEEPSEEK_KEY")%</DeepSeekKey>
+    <QwenKey>%Environment.GetEnvironmentVariable("RECITEHELPER_QWEN_KEY")%</QwenKey>
+    <ResourceCenterServerUrl>http://47.250.181.152:5000</ResourceCenterServerUrl>
+    <HostedServiceUrl></HostedServiceUrl>
+    <HostedLicenseCode></HostedLicenseCode>
     <MissingStrategy>Ignore</MissingStrategy>
-
-    <OCRAccess></OCRAccess>
-    <OCRSecret></OCRSecret>
 
     <PhonkOptions>
         <EnablePhonk>false</EnablePhonk>
@@ -45,8 +47,9 @@ ReciteHelper 是一款面向考试复习、课程学习与知识整理的 AI 桌
 - `MissingStrategy`：知识提取结果缺失时的处理策略。`Ignore` 优先保证速度；`Replay` 会尝试重新处理缺失内容，耗时和 API 消耗更高。
 - `RStandard`：名词解释与解答题判定使用的相似度参数，通常不需要修改。
 - `PhonkOptions`：彩蛋设置。启用 `EnablePhonk` 后，连续答错达到 `WrongCount` 次时会触发特殊效果。
+- `DeepSeekApiEndpoint`、`DeepSeekChatModel`、`QwenApiEndpoint`、`QwenEmbeddingModel`（可选）：API 端点与模型名的自定义覆盖，通常保持默认即可。
 
-可以直接把 Key 写入对应节点，也可以使用环境变量。推荐使用环境变量，避免 Key 以明文保存在配置文件中。例如：
+可以直接把 Key 写入对应节点，也可以使用环境变量占位符。注意：直接写入的明文 Key 会在程序保存配置时自动以 DPAPI（当前用户）加密存储；使用环境变量占位符则完全避免明文落盘。例如：
 
 ```xml
 <DeepSeekKey>%Environment.GetEnvironmentVariable("DEEPSEEK_API_KEY")%</DeepSeekKey>
@@ -197,6 +200,27 @@ ReciteHelper 使用基于 SuperMemo 思路并结合个人答题记录的复习�
 
 ---
 
+## 资源中心与托管模型服务
+
+### 托管模型服务（激活码）
+
+如果没有自己的 DeepSeek / Qwen API Key，可以使用托管模型服务：在 `Config.xml` 中填写获得的 `HostedLicenseCode`，程序会在需要调用模型时自动完成激活；也可以在启动向导的激活窗口中直接输入激活码。激活成功后，内容提取、题目生成和知识库向量生成都会通过托管服务端完成，额度与有效期以服务端返回为准。
+
+- 激活与设备绑定，更换设备或重装系统后可能需要重新激活。
+- 也可以继续使用自己的 API Key，两者只需配置其一。
+
+### 资源中心
+
+资源中心用于在社区内分享和获取学习项目包（`.rhp`）：
+
+- **检索**：主界面进入资源中心后，可按上传者、学校、科目分页筛选。
+- **上传**：选择本地 `.rhp` 项目包并填写上传者、学校、科目元数据。
+- **下载导入**：选择存放目录后自动下载并导入项目，导入完成后会出现在最近项目中。
+
+安全提示：下载的项目包在导入前会进行大小上限、条目类型与包内清单校验，但请仍只从可信来源获取资源；上传时请勿包含个人敏感信息。
+
+---
+
 ## 常见问题（FAQ）
 
 **Q：项目创建后没有章节或题目怎么办？**
@@ -226,6 +250,15 @@ A：可以。题型字段具有兼容读取策略；没有知识库的旧项目�
 ---
 
 ## 更新日志
+
+### v5.1
+- 新增资源中心与托管模型服务（激活码）。
+- 新增卡片学习（FlashCard）模式。
+- 智能复习接入 SuperMemo-2 间隔调度，按到期时间安排复习。
+- 模拟考试主观题与练习统一使用语义判分。
+- API Key 加密存储；配置文件迁移至 %APPDATA%；下载内容安全校验。
+- 修复知识库聚类可能静默丢失知识点的问题；项目文件新增版本号与原子保存。
+- 修复 CI、补充自动化测试。
 
 ### v5-preview （2026.06.28）
 - 新增错题知识检索、匹配内容高亮和按需 AI 解析。

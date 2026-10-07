@@ -455,7 +455,7 @@ public partial class ExamWindow : Window
         StartExamButton.IsEnabled = AgreeCheckBox.IsChecked is true;
     }
 
-    private void ExamTimer_Tick(object? sender, EventArgs e)
+    private async void ExamTimer_Tick(object? sender, EventArgs e)
     {
         _timeRemaining -= TimeSpan.FromSeconds(1);
         UpdateTimeDisplay();
@@ -468,7 +468,7 @@ public partial class ExamWindow : Window
         _timeRemaining = TimeSpan.Zero;
         UpdateTimeDisplay();
         MessageBox.Show("考试时间已到，系统将自动交卷。", "时间到", MessageBoxButton.OK, MessageBoxImage.Information);
-        SubmitExam();
+        await SubmitExamAsync();
     }
 
     private void UpdateTimeDisplay()
@@ -524,7 +524,7 @@ public partial class ExamWindow : Window
         return Math.Max(1, (int)Math.Ceiling(_pages.Count / 2d));
     }
 
-    private void SubmitExamButton_Click(object sender, RoutedEventArgs e)
+    private async void SubmitExamButton_Click(object sender, RoutedEventArgs e)
     {
         var unansweredCount = _questions.Count(question => !question.IsAnswered);
         var prompt = unansweredCount > 0
@@ -532,25 +532,33 @@ public partial class ExamWindow : Window
             : "确定要交卷吗？交卷后将不能修改答案。";
         var result = MessageBox.Show(prompt, "确认交卷", MessageBoxButton.YesNo, MessageBoxImage.Question);
         if (result == MessageBoxResult.Yes)
-            SubmitExam();
+            await SubmitExamAsync();
     }
 
-    private void SubmitExam()
+    private async Task SubmitExamAsync()
     {
         _examTimer.Stop();
         _isExamActive = false;
         _isSubmitted = true;
         RunningPanel.Visibility = Visibility.Collapsed;
         SetPagesActive(false);
-        CalculateScore();
+        await CalculateScoreAsync();
         ResultOverlay.Visibility = Visibility.Visible;
     }
 
-    private void CalculateScore()
+    private async Task CalculateScoreAsync()
     {
+        // Judge every question exactly once (semantic judge for subjective types)
+        // and cache the verdict on the item for the review pages.
+        foreach (var item in _questions)
+        {
+            if (item.Question is null)
+                continue;
+            item.IsCorrectResult = await _examAnswerService.IsCorrectAsync(item.Question, item.UserAnswer);
+        }
+
         var correctQuestions = _questions
-            .Where(question => question.Question is not null &&
-                _examAnswerService.IsCorrect(question.Question, question.UserAnswer))
+            .Where(question => question.Question is not null && question.IsCorrectResult == true)
             .ToList();
         var earnedScore = correctQuestions.Sum(question => question.Score);
         var totalScore = _questions.Sum(question => question.Score);
@@ -577,7 +585,6 @@ public partial class ExamWindow : Window
     {
         var reviewWindow = new ExamReviewWindow(
             _questions.ToList(),
-            _examAnswerService,
             _isImportedExamSet ? _project : null,
             _isImportedExamSet ? _projectCreationService : null,
             _isImportedExamSet ? _projectFileService : null)
