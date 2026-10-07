@@ -51,6 +51,7 @@ public class ConfigService : IConfigService
 
             config.DeepSeekKey = ResolveConfigText(Unprotect(config.DeepSeekKey));
             config.QwenKey = ResolveConfigText(Unprotect(config.QwenKey));
+            config.OpenRouterKey = ResolveConfigText(Unprotect(config.OpenRouterKey));
             config.HostedLicenseCode = Unprotect(config.HostedLicenseCode);
             config.HostedLicenseId = Unprotect(config.HostedLicenseId);
             return config;
@@ -88,6 +89,7 @@ public class ConfigService : IConfigService
             Version = config.Version,
             DeepSeekKey = Protect(config.DeepSeekKey),
             QwenKey = Protect(config.QwenKey),
+            OpenRouterKey = Protect(config.OpenRouterKey),
             ResourceCenterServerUrl = config.ResourceCenterServerUrl,
             HostedServiceUrl = config.HostedServiceUrl,
             HostedLicenseCode = Protect(config.HostedLicenseCode),

@@ -45,23 +45,26 @@ public class Question : Entity
         set => _correctAnswers = value ?? [];
     }
 
+    /// <summary>
+    /// Answer history.  The setter must stay public: System.Text.Json skips properties with a
+    /// private setter, which silently dropped every history from disk in earlier versions.
+    /// </summary>
     [JsonPropertyName("review_tag")]
-    public List<ReviewTag> ReviewTag { get; private set; } = [];
+    public List<ReviewTag> ReviewTag { get; set; } = [];
 
     [JsonPropertyName("correct_answer")]
     public string? CorrectAnswer { get; set; }
 
+    /// <summary>
+    /// Legacy SM-2 easiness factor.  Retained so that project files written by earlier
+    /// versions still load; scheduling no longer reads or updates it.
+    /// </summary>
     [JsonPropertyName("ef_value")]
     public double EFValue { get; set; } = 2.5d;
 
-    [JsonPropertyName("repetitions")]
-    public int Repetitions { get; set; }
-
-    [JsonPropertyName("interval_days")]
-    public int IntervalDays { get; set; }
-
-    [JsonPropertyName("next_review")]
-    public DateTime? NextReviewDate { get; set; }
+    /// <summary>FSRS-6 memory state; null until the question has been answered once.</summary>
+    [JsonPropertyName("memory")]
+    public MemoryRecord? Memory { get; set; }
 
     private Question(bool? status, string? text, List<ReviewTag> reviewTags, string? correctAnswer, double efValue)
     {
@@ -229,38 +232,5 @@ public class Question : Entity
 
         var first = char.ToUpperInvariant(trimmed[0]);
         return first is >= 'A' and <= 'Z' ? first.ToString() : string.Empty;
-    }
-
-    /// <summary>
-    /// SM-2 scheduling (see docs/Dev/sm-algorithm.md): stores the updated easiness
-    /// factor and advances the review interval — 1 day, then 6 days, then
-    /// interval × EF; a failed recall (q &lt; 3) resets the sequence.
-    /// </summary>
-    public void ApplyReviewOutcome(double newEFValue, int quality)
-    {
-        EFValue = Math.Clamp(newEFValue, 1.3d, 5.0d);
-
-        if (quality < 3)
-        {
-            Repetitions = 0;
-            IntervalDays = 1;
-        }
-        else if (Repetitions == 0)
-        {
-            Repetitions = 1;
-            IntervalDays = 1;
-        }
-        else if (Repetitions == 1)
-        {
-            Repetitions = 2;
-            IntervalDays = 6;
-        }
-        else
-        {
-            Repetitions++;
-            IntervalDays = Math.Max(1, (int)Math.Round(IntervalDays * EFValue));
-        }
-
-        NextReviewDate = DateTime.Now.AddDays(IntervalDays);
     }
 }

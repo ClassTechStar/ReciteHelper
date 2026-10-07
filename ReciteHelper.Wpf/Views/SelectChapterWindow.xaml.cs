@@ -26,6 +26,7 @@ public partial class SelectChapterWindow : Window, INotifyPropertyChanged
     private readonly IProjectCreationService _projectCreationService;
     private readonly IGalGameService _galGameService;
     private readonly IQuestionHelpService _questionHelpService;
+    private readonly IReviewPersonalizationService _reviewPersonalizationService;
     private Project? _currentProject;
     private DispatcherTimer _clockTimer;
     private List<ChapterViewModel> _chapters;
@@ -42,8 +43,10 @@ public partial class SelectChapterWindow : Window, INotifyPropertyChanged
         IExamSetRepository examSetRepository,
         IProjectCreationService projectCreationService,
         IGalGameService galGameService,
-        IQuestionHelpService questionHelpService)
+        IQuestionHelpService questionHelpService,
+        IReviewPersonalizationService reviewPersonalizationService)
     {
+        _reviewPersonalizationService = reviewPersonalizationService;
         _projectFileService = projectFileService;
         _quizService = quizService;
         _reviewGenerator = reviewGenerator;
@@ -151,7 +154,8 @@ public partial class SelectChapterWindow : Window, INotifyPropertyChanged
             chapter.Name!,
             _quizService,
             _projectFileService,
-            _questionHelpService)
+            _questionHelpService,
+            _reviewPersonalizationService)
         {
             Title = $"{_currentProject.ProjectName} - {chapter.Name}",
             Owner = this
@@ -214,7 +218,7 @@ public partial class SelectChapterWindow : Window, INotifyPropertyChanged
 
         if (!HasTextGenerationAccess())
         {
-            MessageBox.Show("尚未配置 DeepSeek Key 或托管服务激活码，无法抽取套卷。请在 Config.xml 中配置 DeepSeekKey 或 HostedLicenseCode。", "无法导入", MessageBoxButton.OK, MessageBoxImage.Warning);
+            MessageBox.Show("尚未配置 DeepSeek + Qwen、OpenRouter 或托管服务，无法抽取套卷。", "无法导入", MessageBoxButton.OK, MessageBoxImage.Warning);
             return;
         }
 
@@ -275,7 +279,7 @@ public partial class SelectChapterWindow : Window, INotifyPropertyChanged
 
         if (!HasTextGenerationAccess())
         {
-            MessageBox.Show("尚未配置 DeepSeek Key 或托管服务激活码，无法从新资料中生成题目。请在 Config.xml 中配置 DeepSeekKey 或 HostedLicenseCode。", "无法导入", MessageBoxButton.OK, MessageBoxImage.Warning);
+            MessageBox.Show("尚未配置 DeepSeek + Qwen、OpenRouter 或托管服务，无法从新资料中生成题目。", "无法导入", MessageBoxButton.OK, MessageBoxImage.Warning);
             return;
         }
 
@@ -332,9 +336,7 @@ public partial class SelectChapterWindow : Window, INotifyPropertyChanged
 
     private static bool HasTextGenerationAccess()
     {
-        return !string.IsNullOrWhiteSpace(Config.Configure.DeepSeekKey) ||
-               !string.IsNullOrWhiteSpace(Config.Configure.HostedLicenseId) ||
-               !string.IsNullOrWhiteSpace(Config.Configure.HostedLicenseCode);
+        return ReciteHelper.Core.Configuration.ModelAccess.HasTextGeneration(Config.Configure);
     }
 
     private void SetExamImportState(bool isImporting)
@@ -413,7 +415,8 @@ public partial class SelectChapterWindow : Window, INotifyPropertyChanged
             questionList,
             _quizService,
             _projectFileService,
-            _questionHelpService)
+            _questionHelpService,
+            _reviewPersonalizationService)
         { Owner = System.Windows.Application.Current.MainWindow };
         quizWindow.Show();
         Close();

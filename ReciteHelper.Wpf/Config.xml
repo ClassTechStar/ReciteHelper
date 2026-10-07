@@ -12,6 +12,9 @@
 
 	<DeepSeekKey>%Environment.GetEnvironmentVariable("RECITEHELPER_DEEPSEEK_KEY")%</DeepSeekKey>
 	<QwenKey>%Environment.GetEnvironmentVariable("RECITEHELPER_QWEN_KEY")%</QwenKey>
+	<OpenRouterKey>%Environment.GetEnvironmentVariable("RECITEHELPER_OPENROUTER_KEY")%</OpenRouterKey>
+	<OpenRouterChatModel>deepseek/deepseek-v3.2</OpenRouterChatModel>
+	<OpenRouterEmbeddingModel>baai/bge-m3</OpenRouterEmbeddingModel>
 	<ResourceCenterServerUrl>http://47.250.181.152:5000</ResourceCenterServerUrl>
 	<HostedServiceUrl></HostedServiceUrl>
 	<HostedLicenseCode></HostedLicenseCode>
