@@ -10,7 +10,6 @@ using System.Text;
 using System.Text.Json;
 using System.Text.RegularExpressions;
 using OpenAI.Embeddings;
-using ReciteHelper.Core.Configuration;
 using ReciteHelper.Core.ValueObjects;
 using ReciteHelper.Core.DTOs;
 

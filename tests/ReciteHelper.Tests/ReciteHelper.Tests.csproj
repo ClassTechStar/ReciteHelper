@@ -1,7 +1,7 @@
 <Project Sdk="Microsoft.NET.Sdk">
 
   <PropertyGroup>
-    <TargetFramework>net10.0</TargetFramework>
+    <TargetFramework>net10.0-windows7.0</TargetFramework>
     <ImplicitUsings>enable</ImplicitUsings>
     <Nullable>enable</Nullable>
     <IsPackable>false</IsPackable>
@@ -16,6 +16,7 @@
   <ItemGroup>
     <ProjectReference Include="..\..\ReciteHelper.Application\ReciteHelper.Application.csproj" />
     <ProjectReference Include="..\..\ReciteHelper.Core\ReciteHelper.Core.csproj" />
+    <ProjectReference Include="..\..\ReciteHelper.Infrastructure\ReciteHelper.Infrastructure.csproj" />
   </ItemGroup>
 
 </Project>

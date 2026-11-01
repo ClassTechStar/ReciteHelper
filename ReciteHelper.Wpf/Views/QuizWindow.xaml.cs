@@ -693,6 +693,12 @@ public partial class QuizWindow : Window, INotifyPropertyChanged
     private async void SubmitButton_Click(object sender, RoutedEventArgs e)
     {
         var currentQuestion = _questions[_currentQuestionIndex];
+
+        // Grading mutates the memory model and appends a review tag; ignore
+        // duplicate submissions of an already-graded question.
+        if (currentQuestion.Status != AnswerStatus.NotAnswered)
+            return;
+
         var answerText = GetCurrentAnswerText(currentQuestion);
 
         if (string.IsNullOrWhiteSpace(answerText))
@@ -701,32 +707,43 @@ public partial class QuizWindow : Window, INotifyPropertyChanged
             return;
         }
 
-        currentQuestion.UserAnswer = answerText.Trim();
+        var submitButton = sender as Button;
+        if (submitButton is not null)
+            submitButton.IsEnabled = false;
+        try
+        {
+            currentQuestion.UserAnswer = answerText.Trim();
 
-        var answerResult = await _quizService.ProcessAnswerAsync(
-            _project,
-            currentQuestion.Question!,
-            currentQuestion.UserAnswer,
-            _startTime);
+            var answerResult = await _quizService.ProcessAnswerAsync(
+                _project,
+                currentQuestion.Question!,
+                currentQuestion.UserAnswer,
+                _startTime);
 
-        currentQuestion.Status = answerResult.IsCorrect ? AnswerStatus.Correct : AnswerStatus.Wrong;
+            currentQuestion.Status = answerResult.IsCorrect ? AnswerStatus.Correct : AnswerStatus.Wrong;
 
-        // Show result
-        ShowResult(currentQuestion);
-        AskDeepSeekButton.IsEnabled = true;
-        AnswerTextBox.IsEnabled = false;
-        ChoiceOptionsItemsControl.IsEnabled = false;
-        FillBlankAnswersItemsControl.IsEnabled = false;
-        TrueFalseOptionsPanel.IsEnabled = false;
-        UpdateAnswerCardStyles();
+            // Show result
+            ShowResult(currentQuestion);
+            AskDeepSeekButton.IsEnabled = true;
+            AnswerTextBox.IsEnabled = false;
+            ChoiceOptionsItemsControl.IsEnabled = false;
+            FillBlankAnswersItemsControl.IsEnabled = false;
+            TrueFalseOptionsPanel.IsEnabled = false;
+            UpdateAnswerCardStyles();
 
-        currentQuestion.Question!.Status = answerResult.IsCorrect;
-        QDisplayLabel.Content = MemoryHintFormatter.Format(answerResult.Outcome);
+            currentQuestion.Question!.Status = answerResult.IsCorrect;
+            QDisplayLabel.Content = MemoryHintFormatter.Format(answerResult.Outcome);
 
-        // Play phonk effect
-        _latest.Add(answerResult.IsCorrect);
-        if (_latest.EqualsTo(false) && Config.Configure.PhonkOptions.EnablePhonk)
-            await PlayPhonkEffect();
+            // Play phonk effect
+            _latest.Add(answerResult.IsCorrect);
+            if (_latest.EqualsTo(false) && Config.Configure.PhonkOptions.EnablePhonk)
+                await PlayPhonkEffect();
+        }
+        finally
+        {
+            if (submitButton is not null)
+                submitButton.IsEnabled = true;
+        }
     }
 
     private string GetCurrentAnswerText(QuestionItem currentQuestion)

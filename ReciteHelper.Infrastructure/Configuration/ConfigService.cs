@@ -90,11 +90,16 @@ public class ConfigService : IConfigService
             DeepSeekKey = Protect(config.DeepSeekKey),
             QwenKey = Protect(config.QwenKey),
             OpenRouterKey = Protect(config.OpenRouterKey),
+            DeepSeekApiEndpoint = config.DeepSeekApiEndpoint,
+            DeepSeekChatModel = config.DeepSeekChatModel,
+            QwenApiEndpoint = config.QwenApiEndpoint,
+            QwenEmbeddingModel = config.QwenEmbeddingModel,
             ResourceCenterServerUrl = config.ResourceCenterServerUrl,
             HostedServiceUrl = config.HostedServiceUrl,
             HostedLicenseCode = Protect(config.HostedLicenseCode),
             HostedLicenseId = Protect(config.HostedLicenseId),
             RStandard = config.RStandard,
+            EnableAntiDebug = config.EnableAntiDebug,
             PhonkOptions = config.PhonkOptions,
             Strategy = config.Strategy
         };

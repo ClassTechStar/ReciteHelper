@@ -537,6 +537,10 @@ public partial class ExamWindow : Window
 
     private async Task SubmitExamAsync()
     {
+        // Guard against double submission (manual click racing the timer expiry).
+        if (_isSubmitted)
+            return;
+
         _examTimer.Stop();
         _isExamActive = false;
         _isSubmitted = true;

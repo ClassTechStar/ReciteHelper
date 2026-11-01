@@ -27,10 +27,16 @@ public sealed class AiChatService(
 
         var key = string.IsNullOrWhiteSpace(deepSeekKey) ? config.DeepSeekKey! : deepSeekKey;
 
+        // Honor the configured chat model so question generation follows the same
+        // model override as the knowledge-base service.
+        var model = string.IsNullOrWhiteSpace(config.DeepSeekChatModel)
+            ? ChatModel.DeepSeek.Models.Chat
+            : new ChatModel(config.DeepSeekChatModel.Trim());
+
         var api = new TornadoApi(key);
         var agent = new TornadoAgent(
             client: api,
-            model: ChatModel.DeepSeek.Models.Chat,
+            model: model,
             name: "ArchitectBot",
             instructions: instructions ?? "You are an assistant who is good at extracting knowledge.");
 
